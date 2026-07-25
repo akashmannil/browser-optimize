@@ -1,0 +1,911 @@
+<title>Hearth — Knowledge Graph</title>
+
+<style>
+  /* ── Tokens ──────────────────────────────────────────────────────────────
+     Derived from the application's own palette in src/Hearth/App.xaml, so the
+     documentation reads as part of the product rather than about it.
+     Light theme runs cool-grey on purpose: a warm ground under a warm ember
+     accent flattens it. Cool paper keeps the ember the one hot element.        */
+  :root {
+    --ground:        #E9E9EC;
+    --surface:       #F4F4F6;
+    --surface-2:     #DEDEE3;
+    --line:          #C8C8D0;
+    --ink:           #1C1D20;
+    --ink-soft:      #4A4C52;
+    --muted:         #74767E;
+
+    --ember:         #C25E14;
+    --ember-soft:    rgba(194, 94, 20, 0.12);
+
+    --t-problem:     #8A5AA8;
+    --t-concept:     #B06A16;
+    --t-decision:    #2F6DA8;
+    --t-constraint:  #A83A31;
+    --t-component:   #3B7D5C;
+    --t-api:         #557089;
+    --t-metric:      #96731A;
+    --t-commit:      #6C6E76;
+
+    --good:          #2F7D53;
+    --warn:          #9A6B12;
+    --crit:          #A83A31;
+
+    --shadow:        0 1px 2px rgba(20,20,28,.10), 0 8px 24px rgba(20,20,28,.07);
+
+    --ui: "Segoe UI Variable Display", "Segoe UI Variable", "Segoe UI",
+          system-ui, -apple-system, sans-serif;
+    --mono: "Cascadia Code", "Cascadia Mono", ui-monospace, "SF Mono",
+            Consolas, "Liberation Mono", monospace;
+
+    --step--1: clamp(.72rem, .69rem + .12vw, .78rem);
+    --step-0:  clamp(.86rem, .83rem + .14vw, .94rem);
+    --step-1:  clamp(1.02rem, .97rem + .22vw, 1.16rem);
+    --step-2:  clamp(1.3rem, 1.2rem + .45vw, 1.6rem);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground:       #1A1B1E;
+      --surface:      #232427;
+      --surface-2:    #2B2D31;
+      --line:         #35373C;
+      --ink:          #E6E4E1;
+      --ink-soft:     #B9B7B4;
+      --muted:        #8A8D93;
+
+      --ember:        #E8833A;
+      --ember-soft:   rgba(232, 131, 58, 0.15);
+
+      --t-problem:    #B98BD6;
+      --t-concept:    #E8A34A;
+      --t-decision:   #5B8FC7;
+      --t-constraint: #D2635A;
+      --t-component:  #5FB588;
+      --t-api:        #8FA8BE;
+      --t-metric:     #C9AA4A;
+      --t-commit:     #8E9098;
+
+      --good:         #4C9A6A;
+      --warn:         #C9963C;
+      --crit:         #D2635A;
+
+      --shadow:       0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+    }
+  }
+
+  /* Viewer toggle must beat the media query in both directions. */
+  :root[data-theme="light"] {
+    --ground: #E9E9EC; --surface: #F4F4F6; --surface-2: #DEDEE3; --line: #C8C8D0;
+    --ink: #1C1D20; --ink-soft: #4A4C52; --muted: #74767E;
+    --ember: #C25E14; --ember-soft: rgba(194,94,20,.12);
+    --t-problem: #8A5AA8; --t-concept: #B06A16; --t-decision: #2F6DA8;
+    --t-constraint: #A83A31; --t-component: #3B7D5C; --t-api: #557089;
+    --t-metric: #96731A; --t-commit: #6C6E76;
+    --good: #2F7D53; --warn: #9A6B12; --crit: #A83A31;
+    --shadow: 0 1px 2px rgba(20,20,28,.10), 0 8px 24px rgba(20,20,28,.07);
+  }
+  :root[data-theme="dark"] {
+    --ground: #1A1B1E; --surface: #232427; --surface-2: #2B2D31; --line: #35373C;
+    --ink: #E6E4E1; --ink-soft: #B9B7B4; --muted: #8A8D93;
+    --ember: #E8833A; --ember-soft: rgba(232,131,58,.15);
+    --t-problem: #B98BD6; --t-concept: #E8A34A; --t-decision: #5B8FC7;
+    --t-constraint: #D2635A; --t-component: #5FB588; --t-api: #8FA8BE;
+    --t-metric: #C9AA4A; --t-commit: #8E9098;
+    --good: #4C9A6A; --warn: #C9963C; --crit: #D2635A;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--ui);
+    font-size: var(--step-0);
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .shell {
+    display: grid;
+    grid-template-rows: auto auto 1fr auto;
+    min-height: 100vh;
+    max-width: 1560px;
+    margin: 0 auto;
+  }
+
+  /* ── Header ─────────────────────────────────────────────────────────── */
+  header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 10px 18px;
+    padding: 18px 22px 12px;
+    border-bottom: 1px solid var(--line);
+  }
+  .wordmark {
+    font-size: var(--step-2);
+    font-weight: 650;
+    letter-spacing: -.02em;
+    text-wrap: balance;
+    margin: 0;
+  }
+  .wordmark .spark { color: var(--ember); }
+  .tagline {
+    color: var(--muted);
+    max-width: 62ch;
+    margin: 0;
+    flex: 1 1 320px;
+  }
+  .rev {
+    font-family: var(--mono);
+    font-size: var(--step--1);
+    color: var(--muted);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 2px 7px;
+    white-space: nowrap;
+  }
+
+  /* ── Controls ───────────────────────────────────────────────────────── */
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    padding: 12px 22px;
+    border-bottom: 1px solid var(--line);
+  }
+  .search {
+    font-family: var(--mono);
+    font-size: var(--step--1);
+    background: var(--surface);
+    color: var(--ink);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 6px 10px;
+    min-width: 210px;
+    flex: 0 1 260px;
+  }
+  .search::placeholder { color: var(--muted); }
+  .search:focus-visible { outline: 2px solid var(--ember); outline-offset: 1px; }
+
+  .chip {
+    font: inherit;
+    font-size: var(--step--1);
+    background: transparent;
+    color: var(--ink-soft);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 4px 11px 4px 8px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: background .12s ease, color .12s ease, border-color .12s ease;
+  }
+  .chip:hover { background: var(--surface); }
+  .chip:focus-visible { outline: 2px solid var(--ember); outline-offset: 1px; }
+  .chip .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex: none; }
+  .chip .dot.diamond { border-radius: 1px; transform: rotate(45deg); }
+  .chip .dot.square  { border-radius: 1px; }
+  .chip[aria-pressed="false"] { opacity: .38; }
+  .chip .n {
+    font-family: var(--mono);
+    font-size: .82em;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .spacer { flex: 1 1 auto; }
+  .ghost {
+    font: inherit; font-size: var(--step--1);
+    background: none; border: 1px solid var(--line); border-radius: 4px;
+    color: var(--ink-soft); padding: 5px 11px; cursor: pointer;
+  }
+  .ghost:hover { background: var(--surface); }
+  .ghost:focus-visible { outline: 2px solid var(--ember); outline-offset: 1px; }
+
+  /* ── Main split ─────────────────────────────────────────────────────── */
+  .main {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
+    min-height: 0;
+  }
+  .stage { position: relative; min-height: 460px; min-width: 0; }
+  canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+  canvas:active { cursor: grabbing; }
+  canvas:focus-visible { outline: 2px solid var(--ember); outline-offset: -2px; }
+
+  .hint {
+    position: absolute; left: 16px; bottom: 12px;
+    font-size: var(--step--1); color: var(--muted);
+    pointer-events: none; max-width: 30ch;
+  }
+
+  /* ── Record rail ────────────────────────────────────────────────────── */
+  .rail {
+    border-left: 1px solid var(--line);
+    background: var(--surface);
+    padding: 18px 20px 28px;
+    overflow-y: auto;
+    max-height: calc(100vh - 150px);
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .rail-empty { color: var(--muted); }
+  .rail-empty p { margin: 0 0 10px; }
+
+  .kind {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-family: var(--mono); font-size: var(--step--1);
+    text-transform: uppercase; letter-spacing: .08em;
+  }
+  .rail h2 {
+    font-size: var(--step-1); font-weight: 620; margin: 0;
+    text-wrap: balance; line-height: 1.3;
+  }
+  .nid {
+    font-family: var(--mono); font-size: var(--step--1);
+    color: var(--muted); word-break: break-all;
+  }
+  .rail p { margin: 0; color: var(--ink-soft); }
+
+  .note {
+    border-left: 2px solid var(--line);
+    padding: 8px 0 8px 12px;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .note.is-invariant { border-left-color: var(--crit); }
+  .note.is-thesis    { border-left-color: var(--ember); background: var(--ember-soft); padding-right: 10px; }
+  .note.is-warn      { border-left-color: var(--warn); }
+  .note .lbl {
+    font-family: var(--mono); font-size: var(--step--1);
+    text-transform: uppercase; letter-spacing: .07em; color: var(--muted);
+  }
+  .note.is-invariant .lbl { color: var(--crit); }
+  .note.is-thesis .lbl    { color: var(--ember); }
+  .note .val { color: var(--ink-soft); }
+
+  .edges { display: flex; flex-direction: column; gap: 5px; }
+  .edges h3 {
+    font-family: var(--mono); font-size: var(--step--1); font-weight: 500;
+    text-transform: uppercase; letter-spacing: .07em; color: var(--muted);
+    margin: 6px 0 2px;
+  }
+  .edge {
+    display: grid; grid-template-columns: minmax(88px, auto) 1fr; gap: 4px 10px;
+    align-items: baseline;
+    background: none; border: 0; border-radius: 4px;
+    padding: 4px 6px; margin: 0 -6px;
+    text-align: left; font: inherit; color: var(--ink-soft); cursor: pointer;
+    width: calc(100% + 12px);
+  }
+  .edge:hover { background: var(--surface-2); color: var(--ink); }
+  .edge:focus-visible { outline: 2px solid var(--ember); outline-offset: -2px; }
+  .edge .rel {
+    font-family: var(--mono); font-size: var(--step--1); color: var(--muted);
+  }
+  .edge .peer { font-size: var(--step--1); }
+  .edge .peer b { font-weight: 600; color: var(--ink); }
+
+  .tablewrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: var(--step--1); }
+  th, td { padding: 5px 9px 5px 0; text-align: left; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 500; font-family: var(--mono); }
+  td.num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; padding-right: 0; }
+  td.win { color: var(--good); }
+
+  a { color: var(--ember); text-underline-offset: 2px; }
+  a:focus-visible { outline: 2px solid var(--ember); outline-offset: 2px; }
+  code {
+    font-family: var(--mono); font-size: .92em;
+    background: var(--surface-2); border-radius: 3px; padding: 1px 4px;
+  }
+
+  /* ── Legend ─────────────────────────────────────────────────────────── */
+  footer {
+    border-top: 1px solid var(--line);
+    padding: 12px 22px 18px;
+    display: flex; flex-wrap: wrap; gap: 8px 22px;
+    align-items: center;
+    font-size: var(--step--1); color: var(--muted);
+  }
+  .legend-item { display: inline-flex; align-items: center; gap: 7px; }
+  .glyph { width: 11px; height: 11px; flex: none; border: 1.5px solid var(--muted); }
+  .glyph.circle  { border-radius: 50%; }
+  .glyph.square  { border-radius: 2px; }
+  .glyph.diamond { transform: rotate(45deg); border-radius: 1px; }
+
+  @media (max-width: 900px) {
+    .main { grid-template-columns: minmax(0, 1fr); }
+    .rail { border-left: 0; border-top: 1px solid var(--line); max-height: none; }
+    .stage { min-height: 420px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+  }
+</style>
+
+<div class="shell">
+  <header>
+    <h1 class="wordmark">Hearth<span class="spark">.</span> knowledge graph</h1>
+    <p class="tagline">Why this codebase is shaped the way it is — the decisions, the
+      immovable constraints, and the measurements that settled them.</p>
+    <span class="rev" id="rev">commit 0003</span>
+  </header>
+
+  <div class="controls">
+    <input class="search" id="search" type="search" placeholder="search nodes…"
+           aria-label="Search nodes by id, label or summary" spellcheck="false">
+    <span id="chips" style="display:contents"></span>
+    <span class="spacer"></span>
+    <button class="ghost" id="reset">Reset view</button>
+  </div>
+
+  <div class="main">
+    <div class="stage">
+      <canvas id="cv" tabindex="0" aria-label="Force-directed knowledge graph. Use the record panel to read node details."></canvas>
+      <p class="hint">Drag to reposition · click a node to read its record</p>
+    </div>
+    <aside class="rail" id="rail" aria-live="polite"></aside>
+  </div>
+
+  <footer>
+    <span class="legend-item"><span class="glyph circle"></span>reasoning — problem, concept, decision, metric</span>
+    <span class="legend-item"><span class="glyph square"></span>artifact — component, api, commit</span>
+    <span class="legend-item"><span class="glyph diamond"></span>constraint — cannot be designed away</span>
+    <span class="spacer"></span>
+    <span id="stats"></span>
+  </footer>
+</div>
+
+<script>
+const DATA = {
+  rev: "0003",
+  nodeTypes: {
+    problem:"An observed problem the project exists to solve",
+    concept:"A mental model used to reason about the system",
+    decision:"A choice actively made, with alternatives rejected",
+    constraint:"A hard platform or licensing limit. Immovable",
+    component:"A concrete code artifact in the repository",
+    api:"An external platform API the design depends on",
+    metric:"A measurable quantity validating the design",
+    commit:"A unit of work in the repository history"
+  },
+  nodes: [
+    {id:"p.tab-hoarding",type:"problem",label:"Users hoard tabs and will not close them",summary:"People keep 100–500 tabs open because the tab strip is the only place where 'things I still care about' remain visible. Refusing to close is a rational response to untrustworthy retrieval, not user error."},
+    {id:"p.invisible-cost",type:"problem",label:"The RAM cost of tabs is invisible to users",summary:"Users experience the symptom (a slow machine) but do not attribute it to the browser. Because the cost is never made legible, there is no pressure to change behaviour."},
+    {id:"p.lossy-restore",type:"problem",label:"Existing tab suspenders restore lossily",summary:"Chrome Memory Saver, The Great Suspender and similar tools lose scroll position, form state and media timestamps on restore. The papercut causes users to disable the feature, so the memory is never actually reclaimed."},
+    {id:"p.archive-blackhole",type:"problem",label:"Tab archivers become graveyards",summary:"OneTab, Session Buddy and Toby convert a visible anxious pile into an invisible list nobody revisits. Users intuit this and resist adoption, correctly."},
+
+    {id:"c.process-overhead-dominates",type:"concept",label:"Per-renderer baseline dominates browser memory",summary:"A Chromium renderer costs roughly 40–80 MB for a blank page (V8 isolate, Blink, Mojo, sandbox) before any content loads.",implication:"Any memory strategy that does not reduce the number of live renderers is treating a symptom."},
+    {id:"c.tab-taxonomy",type:"concept",label:"A tab strip holds five different data types",summary:"Active work, a todo, a reference doc, a read-later item, and a fear-of-loss artifact all wear the same UI costume. Applying one lifecycle policy to all five is why every existing tool fails."},
+    {id:"c.refindability",type:"concept",label:"Refindability score",summary:"How hard a tab would be to recover if closed. A homepage is trivially refindable; a filtered dashboard view or half-filled form is not. Aggressive eviction is acceptable only for the former.",status:"planned"},
+    {id:"c.ram-for-disk-trade",type:"concept",label:"Trade RAM for disk at ~200:1",summary:"A hibernated tab costs a WebP screenshot plus serialised state, roughly 150 KB on disk, versus 40–80 MB of RAM live. 200 hibernated tabs fit in ~40 MB of disk."},
+    {id:"c.hibernate-by-default",type:"concept",label:"Hibernated is the default state, live is the exception",summary:"Every other browser treats loaded as default and unloading as an emergency. Chrome Memory Saver and Firefox tab unloading are reactive, triggering only under memory pressure. Hearth inverts this: tabs are documents on disk, temporarily instantiated under a hard budget.",thesis:true},
+
+    {id:"d.webview2-shell",type:"decision",label:"Build a shell on WebView2 rather than fork an engine",summary:"WebView2 provides the modern web for free and exposes the primitives this architecture needs: TrySuspend/Resume, CapturePreview, MemoryUsageTargetLevel.",rationale:"De-risk the product thesis on the cheap substrate first. If screenshot-backed restore does not feel convincing here, a Gecko fork inherits the same failure.",revisit_if:"Shell-level control proves insufficient to hold a hard memory ceiling, or cross-platform support becomes a requirement."},
+    {id:"d.dotnet-wpf",type:"decision",label:"C# / .NET 9 / WPF as the host framework",summary:"WPF is the most mature WebView2 host, builds from the CLI without MSIX packaging friction, and allows direct control over individual CoreWebView2Controller lifetimes.",rationale:"Chosen partly by environment: .NET 9 SDK and VS 2022 present, no Rust toolchain installed. WinUI 3 was rejected for packaging friction."},
+    {id:"d.shared-environment",type:"decision",label:"One shared CoreWebView2Environment for all tabs",summary:"Every WebView2 created from a single environment shares ONE browser process. Allowing each control to create its own (the default) spawns a browser process per tab and destroys the memory budget before it exists.",rationale:"This is the single highest-leverage line of code in the project.",invariant:"Never call EnsureCoreWebView2Async without passing the shared environment."},
+    {id:"d.eviction-is-the-only-lever",type:"decision",label:"Reduce live tabs; do not tune the process model",summary:"Following the process-model finding, Hearth spends no further effort on Chromium switches. RendererProcessLimit and ProcessPerSite remain in HearthOptions but default OFF, retained as documented dead ends so they are not rediscovered and retried.",rationale:"Measured: eviction alone cut memory 35% (TrySuspend) to 66% (full teardown) at a fixed 8-tab workload, while every process-model flag produced no change whatsoever.",revisit_if:"WebView2 exposes a supported process-pooling API, or the project moves to a substrate whose process model the embedder can configure."},
+    {id:"d.teardown-over-suspend",type:"decision",label:"Full teardown is the real lever; TrySuspend is a half-measure",summary:"At budget=3 over the same 8-site workload, TrySuspend reclaimed 35% (1823 → 1188 MB) while destroying the controller reclaimed 53% (1823 → 854 MB). Suspension retains the controller and therefore a large share of the cost.",rationale:"TrySuspend is worth keeping as the fast-resume tier for recently-blurred tabs, but cannot carry the memory promise alone.",blocked_on:"Stays OFF by default until the screenshot placeholder in 0004 exists, because a torn-down tab currently reloads visibly on return."},
+
+    {id:"k.no-per-tab-memory-api",type:"constraint",label:"No per-tab memory API is exposed",summary:"Neither WebView2 nor Chromium exposes per-renderer memory to embedders.",workaround:"Measure the working set of the WebView2 process tree before and after eviction; attribute the delta to the evicted tab. Self-calibrating over time."},
+    {id:"k.widevine-drm",type:"constraint",label:"Widevine DRM requires a licence agreement",summary:"Netflix, Spotify and Prime need Widevine. WebView2 inherits Edge's support, but a shipped product needs a licence relationship with Google. Not a coding problem.",severity:"blocks commercial release"},
+    {id:"k.windows-only",type:"constraint",label:"WebView2 is Windows-only in practice",summary:"Cross-platform would require CEF, Tauri's wry, or a per-OS webview abstraction."},
+    {id:"k.capture-requires-live",type:"constraint",label:"CapturePreview requires a live, realised WebView2",summary:"A screenshot can only be taken while the WebView2 still exists and has rendered. Capture must happen at tab-blur, immediately before eviction, never after.",implication:"A tab restored from a cold session has no screenshot until it has been live once."},
+    {id:"k.site-isolation-multiplies-renderers",type:"constraint",label:"Renderer count exceeds tab count because of site isolation",summary:"WebView2 inherits Chromium site isolation, which allocates a renderer per site instance including cross-origin iframes.",discovered_in:"0002",implication:"A shared environment guarantees one BROWSER process, not one renderer per tab. Capping live tabs alone does not cap renderers.",known_lever:"RETRACTED in 0003 — --renderer-process-limit was assumed to be the lever; it is not."},
+    {id:"k.no-process-model-control",type:"constraint",label:"An embedder has NO control over the WebView2 process model",summary:"Chromium process-model switches passed via AdditionalBrowserArguments reach the browser process and are then ignored. On stackoverflow.com with 1 live tab: no flags = 14 renderers; --renderer-process-limit=4 = 14; --process-per-site = 14; both = 14. The flag was verified present in the browser process command line, so this is not a plumbing bug.",discovered_in:"0003",severity:"architectural",implication:"Renderer count is a function of page content alone. The ONLY memory lever available to a WebView2 embedder is reducing live tabs — i.e. eviction. This validates hibernate-by-default by elimination: not merely the best approach on this substrate, the only one.",informs_v2:"A Gecko fork regains this control, since dom.ipc.processCount genuinely caps the content-process pool. The strongest single argument for WebView2 being a staging post rather than the destination."},
+
+    {id:"api.additional-browser-arguments",type:"api",label:"CoreWebView2EnvironmentOptions.AdditionalBrowserArguments",summary:"Passes raw Chromium command-line switches to the browser process at environment-creation time. Plumbed correctly; Chromium ignores what it carries.",docs:"https://learn.microsoft.com/dotnet/api/microsoft.web.webview2.core.corewebview2environmentoptions.additionalbrowserarguments"},
+    {id:"api.trysuspend",type:"api",label:"CoreWebView2.TrySuspend()",summary:"Suspends a WebView2, freeing renderer memory while keeping the controller alive for fast resume. Requires the controller to be invisible first. Hibernation tier 1.",docs:"https://learn.microsoft.com/dotnet/api/microsoft.web.webview2.core.corewebview2.trysuspend"},
+    {id:"api.capturepreview",type:"api",label:"CoreWebView2.CapturePreviewAsync()",summary:"Captures visible content to a PNG or JPEG stream. Produces the visual placeholder that makes an evicted tab indistinguishable from a live one.",docs:"https://learn.microsoft.com/dotnet/api/microsoft.web.webview2.core.corewebview2.capturepreviewasync"},
+    {id:"api.memory-target-level",type:"api",label:"CoreWebView2.MemoryUsageTargetLevel",summary:"Hints that a WebView2 should minimise memory usage. Cheaper and lower-fidelity than TrySuspend; usable as an intermediate tier for recently-blurred tabs.",docs:"https://learn.microsoft.com/dotnet/api/microsoft.web.webview2.core.corewebview2.memoryusagetargetlevel"},
+
+    {id:"m.steady-state-ceiling",type:"metric",label:"Steady-state working set at high tab count",summary:"Target: total working set stays flat as tab count grows. Chrome at 100 tabs is 6–10 GB, Firefox 2–4 GB.",status:"achieved",hasData:true},
+    {id:"m.restore-fidelity",type:"metric",label:"Restore fidelity",summary:"Whether a rehydrated tab returns to the same scroll offset, form state and media position. The product thesis fails if users can feel eviction happening.",status:"not yet measured"},
+    {id:"m.reclaim-delta",type:"metric",label:"Memory reclaimed per eviction",summary:"Working-set bytes returned to the OS by evicting one tab. Doubles as the per-tab cost estimate that makes the invisible cost legible to users.",status:"not yet measured"},
+
+    {id:"cmp.app",type:"component",label:"App / StoreRoot",file:"src/Hearth/App.xaml.cs",summary:"Application entry point. Owns StoreRoot, the single on-disk location for the WebView2 user-data folder, hibernation screenshots and the session index."},
+    {id:"cmp.mainwindow",type:"component",label:"MainWindow",file:"src/Hearth/Views/MainWindow.xaml.cs",summary:"Application shell and tab-strip host."},
+    {id:"cmp.tabstate",type:"component",label:"TabState",file:"src/Hearth/Core/TabState.cs",summary:"Four-state lifecycle enum (Live, Warm, Hibernated, Cold). Ordered so a higher value means cheaper to hold and slower to restore; eviction always moves a tab to a higher value."},
+    {id:"cmp.browsertab",type:"component",label:"BrowserTab",file:"src/Hearth/Core/BrowserTab.cs",summary:"A tab's durable identity: URL, title, activation history. Deliberately NOT a WebView2 wrapper — the View property is nullable and null is the expected steady state.",invariant:"Null View must never be treated as an error condition. Tabs are documents; renderers are a cache."},
+    {id:"cmp.tabmanager",type:"component",label:"TabManager",file:"src/Hearth/Core/TabManager.cs",summary:"Owns tab lifetime and the single shared CoreWebView2Environment. Holds the environment as a Task awaited by every realisation, so tabs share one initialisation instead of racing.",invariant:"RealiseAsync is the ONLY place permitted to call EnsureCoreWebView2Async, and it always passes the shared environment."},
+    {id:"cmp.hearthoptions",type:"component",label:"HearthOptions",file:"src/Hearth/Core/HearthOptions.cs",summary:"All memory tunables in one record, with environment-variable overrides so configurations can be A/B tested from a script without rebuilding."},
+    {id:"cmp.evictionpolicy",type:"component",label:"EvictionPolicy",file:"src/Hearth/Core/EvictionPolicy.cs",summary:"Scores live tabs worst-first. Recency decays as 1/(1+idleMinutes), weighted by log(1+activationCount), so a reference doc reopened twenty times outranks an article opened once and abandoned.",future:"Where refindability lands: a half-filled form must resist eviction harder than a homepage, because being wrong costs a loss rather than a reload."},
+
+    {id:"commit.0001",type:"commit",label:"0001 — scaffold",summary:"Repo initialised, WPF + WebView2 shell builds and navigates, documentation and knowledge-graph structure established.",doc:"docs/commits/0001-scaffold.md"},
+    {id:"commit.0002",type:"commit",label:"0002 — tab model",summary:"Tab abstraction and TabManager introduced; environment ownership moved out of the window. Its per-tab cost interpretation was retracted in 0003.",doc:"docs/commits/0002-tab-model.md"},
+    {id:"commit.0003",type:"commit",label:"0003 — live budget and eviction",summary:"Live-tab budget with score-based eviction. Established that no Chromium process-model flag has any effect through WebView2, that eviction is therefore the only lever, and that under a fixed budget memory is fully decoupled from tab count.",doc:"docs/commits/0003-live-budget.md"}
+  ],
+  edges: [
+    ["p.tab-hoarding","motivated_by","p.archive-blackhole"],
+    ["c.hibernate-by-default","motivated_by","p.tab-hoarding"],
+    ["c.hibernate-by-default","motivated_by","c.process-overhead-dominates"],
+    ["c.hibernate-by-default","depends_on","c.ram-for-disk-trade"],
+    ["c.hibernate-by-default","measured_by","m.steady-state-ceiling"],
+    ["c.hibernate-by-default","measured_by","m.restore-fidelity"],
+    ["p.lossy-restore","constrains","c.hibernate-by-default"],
+    ["k.capture-requires-live","constrains","api.capturepreview"],
+    ["d.webview2-shell","motivated_by","c.hibernate-by-default"],
+    ["d.webview2-shell","depends_on","api.trysuspend"],
+    ["d.webview2-shell","depends_on","api.capturepreview"],
+    ["d.webview2-shell","depends_on","api.memory-target-level"],
+    ["k.windows-only","constrains","d.webview2-shell"],
+    ["k.widevine-drm","constrains","d.webview2-shell"],
+    ["d.shared-environment","motivated_by","c.process-overhead-dominates"],
+    ["d.shared-environment","implements","c.hibernate-by-default"],
+    ["cmp.mainwindow","implements","d.shared-environment"],
+    ["cmp.mainwindow","depends_on","cmp.app"],
+    ["k.no-per-tab-memory-api","constrains","m.reclaim-delta"],
+    ["p.invisible-cost","measured_by","m.reclaim-delta"],
+    ["d.dotnet-wpf","implements","d.webview2-shell"],
+    ["cmp.app","introduced_in","commit.0001"],
+    ["cmp.mainwindow","introduced_in","commit.0001"],
+    ["cmp.tabmanager","implements","d.shared-environment"],
+    ["cmp.tabmanager","supersedes","cmp.mainwindow"],
+    ["cmp.tabmanager","depends_on","cmp.browsertab"],
+    ["cmp.browsertab","depends_on","cmp.tabstate"],
+    ["cmp.browsertab","implements","c.hibernate-by-default"],
+    ["cmp.tabstate","implements","c.hibernate-by-default"],
+    ["k.site-isolation-multiplies-renderers","constrains","d.shared-environment"],
+    ["k.site-isolation-multiplies-renderers","constrains","m.steady-state-ceiling"],
+    ["k.site-isolation-multiplies-renderers","motivated_by","c.process-overhead-dominates"],
+    ["api.additional-browser-arguments","constrains","k.site-isolation-multiplies-renderers"],
+    ["d.webview2-shell","depends_on","api.additional-browser-arguments"],
+    ["cmp.tabstate","introduced_in","commit.0002"],
+    ["cmp.browsertab","introduced_in","commit.0002"],
+    ["cmp.tabmanager","introduced_in","commit.0002"],
+    ["k.site-isolation-multiplies-renderers","introduced_in","commit.0002"],
+    ["k.no-process-model-control","supersedes","api.additional-browser-arguments"],
+    ["k.no-process-model-control","constrains","d.webview2-shell"],
+    ["k.no-process-model-control","motivated_by","k.site-isolation-multiplies-renderers"],
+    ["d.eviction-is-the-only-lever","motivated_by","k.no-process-model-control"],
+    ["d.eviction-is-the-only-lever","implements","c.hibernate-by-default"],
+    ["d.eviction-is-the-only-lever","rejected_in_favour_of","api.additional-browser-arguments"],
+    ["d.teardown-over-suspend","motivated_by","d.eviction-is-the-only-lever"],
+    ["d.teardown-over-suspend","depends_on","api.capturepreview"],
+    ["p.lossy-restore","constrains","d.teardown-over-suspend"],
+    ["api.trysuspend","implements","d.eviction-is-the-only-lever"],
+    ["c.refindability","motivated_by","p.tab-hoarding"],
+    ["c.refindability","constrains","cmp.evictionpolicy"],
+    ["c.refindability","constrains","d.teardown-over-suspend"],
+    ["cmp.evictionpolicy","implements","d.eviction-is-the-only-lever"],
+    ["cmp.evictionpolicy","implements","c.tab-taxonomy"],
+    ["cmp.evictionpolicy","depends_on","cmp.browsertab"],
+    ["cmp.tabmanager","depends_on","cmp.evictionpolicy"],
+    ["cmp.tabmanager","depends_on","cmp.hearthoptions"],
+    ["cmp.hearthoptions","implements","c.hibernate-by-default"],
+    ["cmp.hearthoptions","introduced_in","commit.0003"],
+    ["cmp.evictionpolicy","introduced_in","commit.0003"],
+    ["k.no-process-model-control","introduced_in","commit.0003"],
+    ["d.eviction-is-the-only-lever","introduced_in","commit.0003"],
+    ["d.teardown-over-suspend","introduced_in","commit.0003"]
+  ]
+};
+
+/* Shape encodes the category an agent most needs to read instantly:
+   a diamond means "immovable", independent of colour. */
+const SHAPE = {
+  problem:"circle", concept:"circle", decision:"circle", metric:"circle",
+  component:"square", api:"square", commit:"square",
+  constraint:"diamond"
+};
+const RADIUS = {
+  problem:13, concept:14, decision:14, constraint:14,
+  component:10, api:10, metric:12, commit:9
+};
+
+const byId = new Map(DATA.nodes.map(n => [n.id, n]));
+const adjacency = new Map(DATA.nodes.map(n => [n.id, []]));
+for (const [from, rel, to] of DATA.edges) {
+  if (!byId.has(from) || !byId.has(to)) continue;
+  adjacency.get(from).push({ rel, peer: to, dir: "out" });
+  adjacency.get(to).push({ rel, peer: from, dir: "in" });
+}
+
+const cv = document.getElementById("cv");
+const ctx = cv.getContext("2d");
+const railEl = document.getElementById("rail");
+const chipsEl = document.getElementById("chips");
+const searchEl = document.getElementById("search");
+
+const active = new Set(Object.keys(DATA.nodeTypes));
+let selected = null, hovered = null, dragging = null, query = "";
+let W = 0, H = 0, theme = {};
+
+/* Seed positions on a ring grouped by type, so the simulation starts from
+   something structured and settles fast rather than exploding from a point. */
+const typeOrder = Object.keys(DATA.nodeTypes);
+const P = DATA.nodes.map((n, i) => {
+  const band = typeOrder.indexOf(n.type);
+  const a = (i / DATA.nodes.length) * Math.PI * 2;
+  const r = 130 + band * 26;
+  return { id: n.id, x: Math.cos(a) * r, y: Math.sin(a) * r, vx: 0, vy: 0, node: n };
+});
+const pos = new Map(P.map(p => [p.id, p]));
+
+function readTheme() {
+  const s = getComputedStyle(document.documentElement);
+  const g = k => s.getPropertyValue(k).trim();
+  theme = {
+    ink: g("--ink"), soft: g("--ink-soft"), muted: g("--muted"),
+    line: g("--line"), ember: g("--ember"), surface: g("--surface"),
+    ground: g("--ground"), crit: g("--crit"),
+    type: Object.fromEntries(typeOrder.map(t => [t, g("--t-" + t)]))
+  };
+}
+
+function resize() {
+  const r = cv.parentElement.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  W = r.width; H = r.height;
+  cv.width = Math.round(W * dpr);
+  cv.height = Math.round(H * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+function visible(n) {
+  if (!active.has(n.type)) return false;
+  if (!query) return true;
+  const q = query.toLowerCase();
+  return n.id.toLowerCase().includes(q)
+      || n.label.toLowerCase().includes(q)
+      || (n.summary || "").toLowerCase().includes(q);
+}
+
+function neighboursOf(id) {
+  return new Set((adjacency.get(id) || []).map(e => e.peer));
+}
+
+/* ── Force simulation ───────────────────────────────────────────────────── */
+let alpha = 1;
+function step() {
+  const shown = P.filter(p => visible(p.node));
+  const cx = W / 2, cy = H / 2;
+
+  for (let i = 0; i < shown.length; i++) {
+    const a = shown[i];
+    for (let j = i + 1; j < shown.length; j++) {
+      const b = shown[j];
+      let dx = b.x - a.x, dy = b.y - a.y;
+      let d2 = dx * dx + dy * dy;
+      if (d2 < 1) { d2 = 1; dx = (Math.random() - .5); dy = (Math.random() - .5); }
+      const d = Math.sqrt(d2);
+      const rep = 5200 / d2;
+      const fx = (dx / d) * rep, fy = (dy / d) * rep;
+      a.vx -= fx; a.vy -= fy;
+      b.vx += fx; b.vy += fy;
+    }
+  }
+
+  for (const [from, , to] of DATA.edges) {
+    const a = pos.get(from), b = pos.get(to);
+    if (!a || !b || !visible(a.node) || !visible(b.node)) continue;
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const d = Math.hypot(dx, dy) || 1;
+    const f = (d - 128) * 0.016;
+    const fx = (dx / d) * f, fy = (dy / d) * f;
+    a.vx += fx; a.vy += fy;
+    b.vx -= fx; b.vy -= fy;
+  }
+
+  for (const p of shown) {
+    if (dragging === p) continue;
+    p.vx += (cx - p.x) * 0.0018;
+    p.vy += (cy - p.y) * 0.0018;
+    p.vx *= 0.86; p.vy *= 0.86;
+    p.x += p.vx * alpha; p.y += p.vy * alpha;
+    const r = RADIUS[p.node.type] + 26;
+    p.x = Math.max(r, Math.min(W - r, p.x));
+    p.y = Math.max(r, Math.min(H - r, p.y));
+  }
+  alpha = Math.max(alpha * 0.995, 0.22);
+}
+
+/* ── Rendering ──────────────────────────────────────────────────────────── */
+function shapePath(p, r, shape) {
+  ctx.beginPath();
+  if (shape === "circle") ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+  else if (shape === "square") ctx.rect(p.x - r, p.y - r, r * 2, r * 2);
+  else {
+    ctx.moveTo(p.x, p.y - r * 1.25); ctx.lineTo(p.x + r * 1.25, p.y);
+    ctx.lineTo(p.x, p.y + r * 1.25); ctx.lineTo(p.x - r * 1.25, p.y);
+    ctx.closePath();
+  }
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+  const focus = selected || hovered;
+  const near = focus ? neighboursOf(focus) : null;
+
+  // Edges first, so nodes always sit above them.
+  for (const [from, rel, to] of DATA.edges) {
+    const a = pos.get(from), b = pos.get(to);
+    if (!a || !b || !visible(a.node) || !visible(b.node)) continue;
+    const lit = focus && (from === focus || to === focus);
+    ctx.save();
+    ctx.strokeStyle = lit ? theme.ember : theme.line;
+    ctx.globalAlpha = focus ? (lit ? 1 : 0.18) : 0.55;
+    ctx.lineWidth = lit ? 1.6 : 1;
+    if (rel === "constrains" || rel === "supersedes") ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+    ctx.restore();
+
+    if (lit) {
+      const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+      ctx.save();
+      ctx.font = '10px Consolas, "Cascadia Mono", ui-monospace, monospace';
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      const w = ctx.measureText(rel).width + 8;
+      ctx.fillStyle = theme.ground; ctx.globalAlpha = .92;
+      ctx.fillRect(mx - w / 2, my - 7, w, 14);
+      ctx.globalAlpha = 1; ctx.fillStyle = theme.ember;
+      ctx.fillText(rel, mx, my);
+      ctx.restore();
+    }
+  }
+
+  for (const p of P) {
+    const n = p.node;
+    if (!visible(n)) continue;
+    const r = RADIUS[n.type];
+    const isFocus = focus === n.id;
+    const dim = focus && !isFocus && !(near && near.has(n.id));
+
+    ctx.save();
+    ctx.globalAlpha = dim ? 0.22 : 1;
+
+    if (n.thesis) {
+      ctx.save();
+      ctx.globalAlpha = dim ? .1 : .22;
+      ctx.fillStyle = theme.ember;
+      shapePath(p, r + 9, SHAPE[n.type]); ctx.fill();
+      ctx.restore();
+    }
+
+    shapePath(p, r, SHAPE[n.type]);
+    ctx.fillStyle = theme.type[n.type];
+    ctx.fill();
+
+    // A ring marks a node carrying a load-bearing invariant.
+    if (n.invariant || isFocus) {
+      ctx.lineWidth = isFocus ? 2.5 : 1.6;
+      ctx.strokeStyle = isFocus ? theme.ember : theme.ink;
+      shapePath(p, r + 4, SHAPE[n.type]);
+      ctx.stroke();
+    }
+
+    const short = n.id.split(".").slice(1).join(".");
+    ctx.font = (isFocus ? "600 " : "") + '10.5px Consolas, "Cascadia Mono", monospace';
+    ctx.textAlign = "center"; ctx.textBaseline = "top";
+    ctx.fillStyle = isFocus ? theme.ink : theme.muted;
+    ctx.fillText(short, p.x, p.y + r + (SHAPE[n.type] === "diamond" ? 8 : 6));
+    ctx.restore();
+  }
+}
+
+let raf;
+function loop() { step(); draw(); raf = requestAnimationFrame(loop); }
+
+/* ── Record rail ────────────────────────────────────────────────────────── */
+const esc = s => String(s).replace(/[&<>"]/g, c =>
+  ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
+
+function noteBlock(label, value, cls) {
+  if (!value) return "";
+  return `<div class="note ${cls || ""}"><span class="lbl">${esc(label)}</span>` +
+         `<span class="val">${esc(value)}</span></div>`;
+}
+
+function measurementTables() {
+  return `
+  <div class="note is-warn">
+    <span class="lbl">Retracted — commit 0002</span>
+    <span class="val">0002 claimed ~234 MB per tab, extrapolating past 20 GB at 100 tabs.
+    Only the last startup URL was activated, so that run had <b>one</b> live tab, not five;
+    stackoverflow.com's cross-origin frames were misread as per-tab cost.
+    Disproof: 1× stackoverflow = 14 renderers / 1176.9 MB, 5× = 14 renderers / 1166.6 MB.
+    Cold tabs cost nothing. Always report live tab count beside open tab count.</span>
+  </div>
+  <div class="tablewrap">
+    <table>
+      <caption class="nid" style="text-align:left;padding-bottom:6px">
+        8 real sites, every tab activated</caption>
+      <thead><tr><th>configuration</th><th class="num">rend.</th>
+        <th class="num">total</th><th class="num">Δ</th></tr></thead>
+      <tbody>
+        <tr><td>budget 8 · no eviction</td><td class="num">21</td><td class="num">1823 MB</td><td class="num">—</td></tr>
+        <tr><td>budget 3 · TrySuspend</td><td class="num">10</td><td class="num">1188 MB</td><td class="num win">−35%</td></tr>
+        <tr><td>budget 3 · teardown</td><td class="num">5</td><td class="num">854 MB</td><td class="num win">−53%</td></tr>
+        <tr><td>budget 1 · teardown</td><td class="num">2</td><td class="num">628 MB</td><td class="num win">−66%</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="tablewrap">
+    <table>
+      <caption class="nid" style="text-align:left;padding-bottom:6px">
+        Budget fixed at 3 — the flatness claim</caption>
+      <thead><tr><th>tabs open</th><th class="num">rend.</th><th class="num">total</th></tr></thead>
+      <tbody>
+        <tr><td>4</td><td class="num">3</td><td class="num">752 MB</td></tr>
+        <tr><td>8</td><td class="num">5</td><td class="num">911 MB</td></tr>
+        <tr><td>16</td><td class="num">3</td><td class="num win">548 MB</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Sixteen tabs cost less than four. Memory is decoupled from tab count — residual
+  variance is <em>which</em> pages are live at sample time, not how many tabs exist.</p>`;
+}
+
+function renderRail() {
+  if (!selected) {
+    railEl.innerHTML = `<div class="rail-empty">
+      <p>Select any node to read its record — summary, rationale, the condition that would
+      justify revisiting it, and every relationship in and out.</p>
+      <p>Nodes carrying a load-bearing <b>invariant</b> are ringed. Diamonds are constraints:
+      platform limits that cannot be designed away.</p>
+      <p class="nid">${DATA.nodes.length} nodes · ${DATA.edges.length} edges</p></div>`;
+    return;
+  }
+  const n = byId.get(selected);
+  const links = adjacency.get(n.id) || [];
+  const out = links.filter(e => e.dir === "out");
+  const inc = links.filter(e => e.dir === "in");
+
+  const list = (arr, heading, verb) => arr.length ? `<h3>${heading}</h3>` + arr.map(e => {
+    const peer = byId.get(e.peer);
+    return `<button class="edge" data-goto="${esc(e.peer)}">
+      <span class="rel">${esc(e.rel)}</span>
+      <span class="peer"><b>${esc(peer.label)}</b><br><span class="nid">${esc(e.peer)}</span></span>
+    </button>`;
+  }).join("") : "";
+
+  railEl.innerHTML = `
+    <span class="kind" style="color:${theme.type[n.type]}">
+      <span class="glyph ${SHAPE[n.type]}" style="border-color:currentColor;background:currentColor"></span>
+      ${esc(n.type)}
+    </span>
+    <h2>${esc(n.label)}</h2>
+    <span class="nid">${esc(n.id)}</span>
+    <p>${esc(n.summary || "")}</p>
+    ${n.thesis ? noteBlock("Core thesis", "This is the bet the whole project rests on.", "is-thesis") : ""}
+    ${noteBlock("Invariant — do not violate", n.invariant, "is-invariant")}
+    ${noteBlock("Rationale", n.rationale)}
+    ${noteBlock("Revisit if", n.revisit_if)}
+    ${noteBlock("Implication", n.implication)}
+    ${noteBlock("Workaround", n.workaround)}
+    ${noteBlock("Blocked on", n.blocked_on, "is-warn")}
+    ${noteBlock("Retracted", n.known_lever, "is-warn")}
+    ${noteBlock("Informs v2", n.informs_v2)}
+    ${noteBlock("Future", n.future)}
+    ${noteBlock("Severity", n.severity, "is-warn")}
+    ${noteBlock("Status", n.status)}
+    ${noteBlock("Discovered in", n.discovered_in ? "commit " + n.discovered_in : "")}
+    ${n.file ? `<p class="nid">${esc(n.file)}</p>` : ""}
+    ${n.doc ? `<p class="nid">${esc(n.doc)}</p>` : ""}
+    ${n.docs ? `<p><a href="${esc(n.docs)}" target="_blank" rel="noopener">Microsoft Learn reference ↗</a></p>` : ""}
+    ${n.hasData ? measurementTables() : ""}
+    <div class="edges">${list(out, "This node →", "out")}${list(inc, "→ This node", "in")}</div>`;
+
+  railEl.querySelectorAll("[data-goto]").forEach(b =>
+    b.addEventListener("click", () => select(b.dataset.goto)));
+  railEl.scrollTop = 0;
+}
+
+function select(id) {
+  selected = id;
+  alpha = Math.max(alpha, .5);
+  renderRail();
+}
+
+/* ── Filter chips ───────────────────────────────────────────────────────── */
+function buildChips() {
+  chipsEl.innerHTML = "";
+  for (const t of typeOrder) {
+    const count = DATA.nodes.filter(n => n.type === t).length;
+    const b = document.createElement("button");
+    b.className = "chip";
+    b.type = "button";
+    b.setAttribute("aria-pressed", "true");
+    b.title = DATA.nodeTypes[t];
+    b.style.color = `var(--t-${t})`;
+    b.innerHTML = `<span class="dot ${SHAPE[t]}"></span>` +
+                  `<span style="color:var(--ink)">${t}</span><span class="n">${count}</span>`;
+    b.addEventListener("click", () => {
+      active.has(t) ? active.delete(t) : active.add(t);
+      b.setAttribute("aria-pressed", String(active.has(t)));
+      if (selected && !active.has(byId.get(selected).type)) { selected = null; renderRail(); }
+      alpha = 1;
+    });
+    chipsEl.appendChild(b);
+  }
+}
+
+/* ── Pointer interaction ────────────────────────────────────────────────── */
+function at(ev) {
+  const r = cv.getBoundingClientRect();
+  return { x: ev.clientX - r.left, y: ev.clientY - r.top };
+}
+function hit(pt) {
+  let best = null, bd = Infinity;
+  for (const p of P) {
+    if (!visible(p.node)) continue;
+    const d = Math.hypot(p.x - pt.x, p.y - pt.y);
+    const r = RADIUS[p.node.type] + 8;
+    if (d < r && d < bd) { best = p; bd = d; }
+  }
+  return best;
+}
+
+cv.addEventListener("pointerdown", ev => {
+  const p = hit(at(ev));
+  if (p) { dragging = p; cv.setPointerCapture(ev.pointerId); select(p.id); }
+});
+cv.addEventListener("pointermove", ev => {
+  const pt = at(ev);
+  if (dragging) { dragging.x = pt.x; dragging.y = pt.y; dragging.vx = dragging.vy = 0; return; }
+  const p = hit(pt);
+  const id = p ? p.id : null;
+  if (id !== hovered) { hovered = id; cv.style.cursor = p ? "pointer" : "grab"; }
+});
+cv.addEventListener("pointerup", ev => {
+  dragging = null;
+  try { cv.releasePointerCapture(ev.pointerId); } catch {}
+});
+cv.addEventListener("pointerleave", () => { hovered = null; dragging = null; });
+
+searchEl.addEventListener("input", () => { query = searchEl.value.trim(); alpha = 1; });
+document.getElementById("reset").addEventListener("click", () => {
+  selected = null; hovered = null; query = ""; searchEl.value = "";
+  typeOrder.forEach(t => active.add(t));
+  chipsEl.querySelectorAll(".chip").forEach(c => c.setAttribute("aria-pressed", "true"));
+  P.forEach((p, i) => {
+    const a = (i / P.length) * Math.PI * 2, r = 150 + (typeOrder.indexOf(p.node.type)) * 26;
+    p.x = W / 2 + Math.cos(a) * r; p.y = H / 2 + Math.sin(a) * r; p.vx = p.vy = 0;
+  });
+  alpha = 1; renderRail();
+});
+
+/* ── Boot ───────────────────────────────────────────────────────────────── */
+function boot() {
+  readTheme(); resize();
+  P.forEach(p => { p.x += W / 2; p.y += H / 2; });
+  buildChips(); renderRail();
+  document.getElementById("rev").textContent = "commit " + DATA.rev;
+  document.getElementById("stats").textContent =
+    `${DATA.nodes.length} nodes · ${DATA.edges.length} edges · generated from docs/knowledge-graph.json`;
+
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    for (let i = 0; i < 320; i++) step();
+    alpha = 0.22;
+    draw();
+    const still = () => { step(); draw(); };
+    cv.addEventListener("pointermove", still);
+    cv.addEventListener("pointerdown", still);
+    searchEl.addEventListener("input", () => { for (let i = 0; i < 120; i++) step(); draw(); });
+    chipsEl.addEventListener("click", () => { for (let i = 0; i < 120; i++) step(); draw(); });
+    document.getElementById("reset").addEventListener("click", () => {
+      for (let i = 0; i < 240; i++) step(); draw();
+    });
+    railEl.addEventListener("click", still);
+  } else {
+    loop();
+  }
+}
+
+window.addEventListener("resize", () => { resize(); alpha = Math.max(alpha, .6); });
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+  readTheme(); if (selected) renderRail();
+});
+new MutationObserver(() => { readTheme(); if (selected) renderRail(); })
+  .observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+
+boot();
+</script>

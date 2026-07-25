@@ -92,8 +92,9 @@ folder beside the built executable, so a checkout stays self-contained and dispo
 ## Documentation
 
 - [`docs/architecture.md`](docs/architecture.md) — the design and where memory actually goes
-- [`docs/knowledge-graph.md`](docs/knowledge-graph.md) — visual reasoning graph
+- [`docs/knowledge-graph.html`](docs/knowledge-graph.html) — **interactive graph explorer**; open it in a browser
 - [`docs/knowledge-graph.json`](docs/knowledge-graph.json) — machine-readable, for AI agents
+- [`docs/knowledge-graph.md`](docs/knowledge-graph.md) — mermaid rendering and node index
 - [`docs/commits/`](docs/commits/) — one design note per commit
 
 ## Known limits

@@ -35,7 +35,9 @@ Every functional change ships as its own commit with a matching design note:
 3. Update `docs/knowledge-graph.json` **in the same commit** — add nodes for new components,
    decisions and constraints; add edges; bump `graph_updated_at_commit`. A feature whose nodes are
    missing is invisible to the next agent.
-4. Update the `docs/knowledge-graph.md` mermaid diagrams and node index to match.
+4. Update the `docs/knowledge-graph.md` mermaid diagrams and node index to match, **and the
+   `DATA` object in `docs/knowledge-graph.html`** — the explorer embeds its own copy so it stays a
+   single self-contained file, so the two can drift. Node and edge counts must match the JSON.
 5. Add the commit to the status table in `README.md`.
 6. Reference knowledge-graph node ids (e.g. `d.shared-environment`) in the commit message body.
 

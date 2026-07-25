@@ -383,6 +383,10 @@
     { "from": "p.lossy-restore",         "rel": "constrains",   "to": "d.teardown-over-suspend" },
     { "from": "api.trysuspend",          "rel": "implements",   "to": "d.eviction-is-the-only-lever" },
 
+    { "from": "c.refindability",       "rel": "motivated_by", "to": "p.tab-hoarding",       "note": "The anxiety driving hoarding is fear of irrecoverable loss, not attachment to the page." },
+    { "from": "c.refindability",       "rel": "constrains",   "to": "cmp.evictionpolicy",   "note": "Planned. Scoring must eventually weight how hard a tab would be to recover, not only recency and habit." },
+    { "from": "c.refindability",       "rel": "constrains",   "to": "d.teardown-over-suspend", "note": "Teardown is safe for a homepage and unsafe for a half-filled form; the policy has to tell them apart." },
+
     { "from": "cmp.evictionpolicy",    "rel": "implements",   "to": "d.eviction-is-the-only-lever" },
     { "from": "cmp.evictionpolicy",    "rel": "implements",   "to": "c.tab-taxonomy" },
     { "from": "cmp.evictionpolicy",    "rel": "depends_on",   "to": "cmp.browsertab" },

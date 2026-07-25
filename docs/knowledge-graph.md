@@ -3,6 +3,11 @@
 This is the human-readable rendering of [`knowledge-graph.json`](knowledge-graph.json), which is the
 authoritative machine-readable source. **If the two disagree, the JSON wins.**
 
+> **Browsing by hand?** Open [`knowledge-graph.html`](knowledge-graph.html) — an interactive
+> force-directed view of the same data, with filtering, search, and a record panel showing each
+> node's rationale, invariants and relationships. Single self-contained file, no build step, no
+> network access. Double-click it.
+
 ## Why this file exists
 
 Source code records *what* a system does. It does not record why it is shaped that way, which
