@@ -2,7 +2,7 @@
   "project": "hearth",
   "description": "A low-resource Windows browser shell built on WebView2, whose core bet is that hibernated is a tab's default state and live is a budgeted exception.",
   "schema_version": "1.0",
-  "graph_updated_at_commit": "0004",
+  "graph_updated_at_commit": "0005",
   "consumer_notes": "This file is the authoritative machine-readable model of WHY this codebase is shaped the way it is. Source code records what the system does; this graph records the reasoning, the rejected alternatives, and the constraints that must not be violated. Agents should read this before proposing architectural changes. Every node has a stable `id` that is safe to reference in commits, issues, and other documents. When you add a feature, add its nodes/edges here in the same commit.",
 
   "node_types": {
@@ -162,7 +162,26 @@
       "discovered_in": "0003",
       "severity": "architectural",
       "implication": "Renderer count is a function of page content alone. The ONLY memory lever available to a WebView2 embedder is reducing the number of live tabs -- i.e. eviction. This validates c.hibernate-by-default by elimination: it is not merely the best approach on this substrate, it is the only one.",
-      "informs_v2": "A Gecko fork regains this control, since dom.ipc.processCount genuinely caps the content-process pool. This is now the strongest single argument for d.webview2-shell being a staging post rather than the destination."
+      "informs_v2": "A Gecko fork regains this control, since dom.ipc.processCount genuinely caps the content-process pool. This is now the strongest single argument for d.webview2-shell being a staging post rather than the destination.",
+      "resolved_indirectly_in": "0005 — see d.content-blocking-is-the-indirect-lever. The process model stays untouchable, but renderer count is a function of page CONTENT, and content is something an embedder controls absolutely. Refusing cross-origin subframes achieved what every Chromium switch failed to do."
+    },
+    {
+      "id": "d.content-blocking-is-the-indirect-lever",
+      "type": "decision",
+      "label": "Control renderer count through content, not through the process model",
+      "summary": "Since no process-model API is available, low-power mode refuses cross-origin subframe documents and media at the WebResourceRequested filter instead. Renderer count is downstream of what the page is allowed to load, so declining the fan-out sources achieves the cap directly.",
+      "measured_0005": "One tab on stackoverflow.com: normal = 14 renderers / 1355.6 MB; low power with blocking = 1 renderer / 301.0 MB (-78%); low power with blocking DISABLED = 14 renderers / 1242.8 MB. The third run is the control that matters -- it isolates the reduction to frame blocking rather than to the tighter budget, which with a single tab never binds at all.",
+      "rationale": "This is the answer to k.no-process-model-control and it closes the loop opened in 0003. Every Chromium switch was ignored; a content filter moved renderer count from 14 to 1.",
+      "revisit_if": "WebView2 ever exposes real process-pooling, at which point capping directly would be preferable to breaking pages."
+    },
+    {
+      "id": "k.frame-blocking-breaks-pages",
+      "type": "constraint",
+      "label": "Blocking cross-origin frames breaks real functionality",
+      "summary": "Refusing cross-origin subframes removes embedded video players, OAuth and SSO login flows, comment widgets, payment frames, CAPTCHAs and map embeds. These are not incidental -- some are the only route through a page.",
+      "discovered_in": "0005",
+      "implication": "This is why it is a MODE and not a default. Low power is an explicit user choice with a visible, engaged-looking toggle; it must never be entered silently, because a page failing to log in with no explanation is worse than the memory it saves.",
+      "future": "A per-site allowlist would let login and payment frames through while still refusing ad and analytics frames -- most of the memory win with much less breakage."
     },
     {
       "id": "d.eviction-is-the-only-lever",
@@ -325,6 +344,22 @@
       "doc": "docs/commits/0003-live-budget.md"
     },
     {
+      "id": "cmp.memoryprobe",
+      "type": "component",
+      "label": "MemoryProbe",
+      "file": "src/Hearth/Core/MemoryProbe.cs",
+      "summary": "Samples the working set of Hearth's own process tree via a Toolhelp32 snapshot, walking descendants of the current PID. Makes the memory readout in the taskbar a measured figure rather than an estimate.",
+      "rationale": "Descendants are walked rather than filtering every msedgewebview2.exe on the machine, because Windows runs several other WebView2 apps (Widgets, Store, Teams) whose memory is not ours to report.",
+      "invariant": "Never display a memory number this process has not actually observed. The project's argument is that the cost is real; a fabricated figure forfeits it."
+    },
+    {
+      "id": "commit.0005",
+      "type": "commit",
+      "label": "0005 - taskbar and low-power mode",
+      "summary": "Replaced the developer status strip with a real taskbar: navigation, a measured memory readout in plain language, and a low-power toggle. Low power tightens the budget and refuses cross-origin frames and media, cutting stackoverflow.com from 14 renderers to 1.",
+      "doc": "docs/commits/0005-taskbar-low-power.md"
+    },
+    {
       "id": "cmp.snapshotstore",
       "type": "component",
       "label": "SnapshotStore",
@@ -440,7 +475,24 @@
     { "from": "cmp.snapshotstore", "rel": "measured_by",  "to": "m.restore-fidelity" },
     { "from": "k.capture-requires-live", "rel": "constrains", "to": "cmp.snapshotstore", "note": "Violated by the first implementation, which captured after the tab was already collapsed." },
     { "from": "cmp.tabmanager",    "rel": "depends_on",   "to": "cmp.snapshotstore" },
-    { "from": "cmp.snapshotstore", "rel": "introduced_in", "to": "commit.0004" }
+    { "from": "cmp.snapshotstore", "rel": "introduced_in", "to": "commit.0004" },
+
+    { "from": "d.content-blocking-is-the-indirect-lever", "rel": "motivated_by", "to": "k.no-process-model-control" },
+    { "from": "d.content-blocking-is-the-indirect-lever", "rel": "supersedes",   "to": "api.additional-browser-arguments", "note": "The content filter achieved what every Chromium switch could not." },
+    { "from": "d.content-blocking-is-the-indirect-lever", "rel": "constrains",   "to": "k.site-isolation-multiplies-renderers", "note": "Fewer cross-origin frames means fewer site instances to isolate." },
+    { "from": "d.content-blocking-is-the-indirect-lever", "rel": "implements",   "to": "c.hibernate-by-default" },
+    { "from": "k.frame-blocking-breaks-pages", "rel": "constrains", "to": "d.content-blocking-is-the-indirect-lever", "note": "Why it is a mode and never a silent default." },
+    { "from": "cmp.tabmanager",    "rel": "implements",   "to": "d.content-blocking-is-the-indirect-lever" },
+
+    { "from": "cmp.memoryprobe",   "rel": "measured_by",  "to": "m.reclaim-delta" },
+    { "from": "cmp.memoryprobe",   "rel": "implements",   "to": "k.no-per-tab-memory-api", "note": "The process-tree workaround the constraint prescribes." },
+    { "from": "p.invisible-cost",  "rel": "constrains",   "to": "cmp.memoryprobe",         "note": "The readout exists to make the cost legible without nagging." },
+    { "from": "cmp.mainwindow",    "rel": "depends_on",   "to": "cmp.memoryprobe" },
+
+    { "from": "cmp.memoryprobe",   "rel": "introduced_in", "to": "commit.0005" },
+    { "from": "d.content-blocking-is-the-indirect-lever", "rel": "introduced_in", "to": "commit.0005" },
+    { "from": "k.frame-blocking-breaks-pages",            "rel": "introduced_in", "to": "commit.0005" }
   ]
 }
+
 

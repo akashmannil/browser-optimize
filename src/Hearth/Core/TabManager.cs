@@ -67,6 +67,76 @@ public sealed class TabManager
     /// <summary>Tabs currently holding a full renderer. This is what the budget caps.</summary>
     public int LiveCount => _tabs.Count(t => t.State == TabState.Live);
 
+    /// <summary>Whether low-power mode is engaged.</summary>
+    public bool LowPower { get; private set; }
+
+    /// <summary>The budget actually in force, which low-power mode tightens.</summary>
+    public int EffectiveBudget => LowPower ? _options.LowPowerBudget : _options.LiveTabBudget;
+
+    /// <summary>
+    /// Engages or releases low-power mode. Content filtering only affects
+    /// requests made from now on, so the active tab is reloaded to give the
+    /// change an immediate, visible effect rather than one that arrives
+    /// silently three navigations later.
+    /// </summary>
+    public async Task SetLowPowerAsync(bool on)
+    {
+        if (LowPower == on) return;
+        LowPower = on;
+
+        foreach (var tab in _tabs)
+            if (tab.View?.CoreWebView2 is { } core) ApplyContentPolicy(core);
+
+        await _budgetGate.WaitAsync();
+        try { await EnforceBudgetAsync(); }
+        finally { _budgetGate.Release(); }
+
+        if (Active?.View?.CoreWebView2 is { } activeCore) activeCore.Reload();
+
+        Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Installs or clears the low-power request filter on a realised tab.
+    /// Registering the filter is idempotent, so the handler alone is toggled.
+    /// </summary>
+    private void ApplyContentPolicy(CoreWebView2 core)
+    {
+        core.WebResourceRequested -= OnWebResourceRequested;
+        if (!LowPower || !_options.BlockThirdPartyFrames) return;
+
+        core.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.Document);
+        core.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.Media);
+        core.WebResourceRequested += OnWebResourceRequested;
+    }
+
+    private void OnWebResourceRequested(object? sender, CoreWebView2WebResourceRequestedEventArgs e)
+    {
+        if (sender is not CoreWebView2 core) return;
+
+        // Media is refused outright in low-power mode: autoplaying video is the
+        // single most expensive thing a background page can do.
+        if (e.ResourceContext == CoreWebView2WebResourceContext.Media)
+        {
+            e.Response = core.Environment.CreateWebResourceResponse(null, 204, "Blocked", "");
+            return;
+        }
+
+        if (e.ResourceContext != CoreWebView2WebResourceContext.Document) return;
+
+        // A Document request whose host differs from the top-level page is a
+        // cross-origin subframe — an ad, a widget, an embedded player. Each one
+        // costs a dedicated renderer under site isolation.
+        if (!Uri.TryCreate(e.Request.Uri, UriKind.Absolute, out var requested)) return;
+        if (!Uri.TryCreate(core.Source, UriKind.Absolute, out var top)) return;
+        if (string.Equals(requested.Host, top.Host, StringComparison.OrdinalIgnoreCase)) return;
+
+        // Never block the top-level navigation itself.
+        if (string.Equals(e.Request.Uri, core.Source, StringComparison.OrdinalIgnoreCase)) return;
+
+        e.Response = core.Environment.CreateWebResourceResponse(null, 204, "Blocked", "");
+    }
+
     /// <summary>Tabs suspended but still holding a controller.</summary>
     public int HibernatedCount => _tabs.Count(t => t.State == TabState.Hibernated);
 
@@ -170,7 +240,7 @@ public sealed class TabManager
     private async Task EnforceBudgetAsync()
     {
         var now = DateTime.UtcNow;
-        var overBudget = LiveCount - _options.LiveTabBudget;
+        var overBudget = LiveCount - EffectiveBudget;
         if (overBudget <= 0) return;
 
         foreach (var victim in EvictionPolicy.EvictionOrder(_tabs, Active, now).Take(overBudget))
@@ -246,6 +316,8 @@ public sealed class TabManager
         await view.EnsureCoreWebView2Async(environment);
 
         var core = view.CoreWebView2;
+        ApplyContentPolicy(core);
+
         core.DocumentTitleChanged += (_, _) =>
         {
             tab.Title = string.IsNullOrWhiteSpace(core.DocumentTitle)

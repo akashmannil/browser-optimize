@@ -5,6 +5,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using Hearth.Core;
 
 namespace Hearth.Views;
@@ -14,6 +15,8 @@ public partial class MainWindow : Window
     private const string HomeUrl = "https://example.com";
 
     private TabManager? _tabs;
+    private DispatcherTimer? _memoryTimer;
+    private long _peakBytes;
 
     public MainWindow()
     {
@@ -37,6 +40,12 @@ public partial class MainWindow : Window
         });
 
         TabStrip.ItemsSource = _tabs.Tabs;
+
+        if (_tabs.Options.StartInLowPower)
+        {
+            await _tabs.SetLowPowerAsync(true);
+            LowPowerToggle.IsChecked = true;
+        }
 
         // Startup URLs may be passed on the command line, which is ordinary
         // browser behaviour and — more usefully here — makes memory runs at a
@@ -66,6 +75,8 @@ public partial class MainWindow : Window
                 _tabs.Open(startup[i], activate: i == startup.Length - 1);
         }
 
+        StartMemorySampling();
+
         // Surfacing the runtime version proves the shared environment resolved.
         var version = await _tabs.GetRuntimeVersionAsync();
         Title = $"Hearth — WebView2 {version}";
@@ -81,16 +92,73 @@ public partial class MainWindow : Window
         if (active is not null && !AddressBar.IsFocused)
             AddressBar.Text = active.Url;
 
-        // Live count is the number the budget in commit 0003 will cap. Showing it
-        // now, before it is enforced, gives a baseline to compare against.
-        var o = _tabs.Options;
-        var cap = o.RendererProcessLimit is { } l ? $"{l}" : "∞";
+        var core = active?.View?.CoreWebView2;
+        BackButton.IsEnabled = core?.CanGoBack ?? false;
+        ForwardButton.IsEnabled = core?.CanGoForward ?? false;
+        ReloadButton.IsEnabled = core is not null;
 
-        StatusText.Text =
-            $"{_tabs.Tabs.Count} tabs  ·  {_tabs.LiveCount}/{o.LiveTabBudget} live  ·  " +
-            $"{_tabs.HibernatedCount} hibernated  ·  renderer cap {cap}  ·  " +
-            $"{active?.Title ?? "—"}";
+        // "Awake" and "resting" rather than "live" and "hibernated". Resting
+        // carries the promise that matters — it will be there when you come
+        // back — where the mechanism's own vocabulary carries nothing.
+        var resting = _tabs.Tabs.Count - _tabs.LiveCount;
+        TabsText.Text = resting > 0
+            ? $"{_tabs.LiveCount} awake · {resting} resting"
+            : $"{_tabs.LiveCount} awake";
     }
+
+    /// <summary>
+    /// Samples real memory on a timer. Measured from our own process tree, never
+    /// estimated — the project's whole argument is that the cost is real, and a
+    /// fabricated number would forfeit that.
+    /// </summary>
+    private void StartMemorySampling()
+    {
+        _memoryTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+        _memoryTimer.Tick += (_, _) =>
+        {
+            var reading = MemoryProbe.Sample();
+            _peakBytes = Math.Max(_peakBytes, reading.TotalBytes);
+
+            MemoryText.Text = MemoryProbe.Format(reading.TotalBytes);
+
+            // Peak-versus-current is the closest honest statement we can make
+            // about savings without a counterfactual run: it is what this
+            // session actually reached, against what it holds now.
+            var saved = _peakBytes - reading.TotalBytes;
+            SavedText.Text = saved > 32 * 1024 * 1024
+                ? $"{MemoryProbe.Format(saved)} returned since this session's peak"
+                : $"{reading.ProcessCount} processes";
+        };
+        _memoryTimer.Start();
+    }
+
+    private void Back_Click(object sender, RoutedEventArgs e)
+    {
+        var core = _tabs?.Active?.View?.CoreWebView2;
+        if (core?.CanGoBack == true) core.GoBack();
+    }
+
+    private void Forward_Click(object sender, RoutedEventArgs e)
+    {
+        var core = _tabs?.Active?.View?.CoreWebView2;
+        if (core?.CanGoForward == true) core.GoForward();
+    }
+
+    private void Reload_Click(object sender, RoutedEventArgs e) =>
+        _tabs?.Active?.View?.CoreWebView2?.Reload();
+
+    private void Home_Click(object sender, RoutedEventArgs e)
+    {
+        if (_tabs?.Active is { } tab) _tabs.Navigate(tab, HomeUrl);
+    }
+
+    private async void LowPower_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_tabs is null) return;
+        await _tabs.SetLowPowerAsync(LowPowerToggle.IsChecked == true);
+        Sync();
+    }
+
 
     private void Navigate()
     {

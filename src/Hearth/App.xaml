@@ -11,5 +11,73 @@
         <SolidColorBrush x:Key="ChromeField"      Color="#2B2D31" />
 
         <views:StateToBrushConverter x:Key="StateToBrush" />
+
+        <!-- Toolbar button: square hit target, no chrome until hovered. Disabled
+             state matters here — back/forward are dead most of the time and
+             should look it rather than inviting a click that does nothing. -->
+        <Style x:Key="ToolButton" TargetType="Button">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource ChromeForeground}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Width" Value="32" />
+            <Setter Property="Height" Value="30" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Chrome" Background="{TemplateBinding Background}"
+                                CornerRadius="5">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Chrome" Property="Background"
+                                        Value="#33FFFFFF" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.3" />
+                                <Setter Property="Cursor" Value="Arrow" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Mode toggle: reads as pressed when its mode is engaged, because a
+             browser that has silently changed how it loads pages must say so. -->
+        <Style x:Key="ModeToggle" TargetType="ToggleButton">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource ChromeMuted}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="11,5" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Chrome" Background="{TemplateBinding Background}"
+                                CornerRadius="999" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Chrome" Property="Background"
+                                        Value="#33FFFFFF" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Chrome" Property="Background"
+                                        Value="{StaticResource ChromeAccent}" />
+                                <Setter Property="Foreground" Value="#1E1F22" />
+                                <Setter Property="FontWeight" Value="SemiBold" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Application.Resources>
 </Application>

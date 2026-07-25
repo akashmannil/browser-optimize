@@ -82,6 +82,29 @@ public sealed record HearthOptions
     /// </summary>
     public bool AllowFullTeardown { get; init; } = true;
 
+    /// <summary>
+    /// Live-tab budget while low-power mode is engaged. Deliberately tight: the
+    /// point of the mode is that the machine stops being the browser's, and a
+    /// budget of 2 still supports the read-here / reference-there pattern that
+    /// is most of actual browsing.
+    /// </summary>
+    public int LowPowerBudget { get; init; } = 2;
+
+    /// <summary>
+    /// In low-power mode, refuse cross-origin subframe documents and media.
+    ///
+    /// This is the indirect answer to k.no-process-model-control. We cannot cap
+    /// renderers directly — every Chromium switch is ignored — but renderer
+    /// count is a function of page CONTENT, and content is something an embedder
+    /// absolutely can refuse. Cross-origin iframes are what fan a single tab out
+    /// into a dozen renderers, so declining them should cut process count
+    /// without any process-model API at all.
+    /// </summary>
+    public bool BlockThirdPartyFrames { get; init; } = true;
+
+    /// <summary>Engage low-power mode at startup. Set by the benchmark harness.</summary>
+    public bool StartInLowPower { get; init; }
+
     public static HearthOptions Default { get; } = new();
 
     /// <summary>
@@ -112,6 +135,16 @@ public sealed record HearthOptions
         // builds is how commit 0002 produced a number it had to retract.
         if (Flag("HEARTH_FULL_TEARDOWN") is { } teardown)
             options = options with { AllowFullTeardown = teardown };
+
+        if (Flag("HEARTH_BLOCK_FRAMES") is { } blockFrames)
+            options = options with { BlockThirdPartyFrames = blockFrames };
+
+        if (int.TryParse(Environment.GetEnvironmentVariable("HEARTH_LOW_POWER_BUDGET"),
+                out var lpBudget) && lpBudget > 0)
+            options = options with { LowPowerBudget = lpBudget };
+
+        if (Flag("HEARTH_LOW_POWER") is true)
+            options = options with { StartInLowPower = true };
 
         return options;
     }

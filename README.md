@@ -36,6 +36,25 @@ Early. Built commit by commit, each with a design note in [`docs/commits/`](docs
 | [`0002`](docs/commits/0002-tab-model.md) | Tab model, tab strip, `TabManager` owns the environment |
 | [`0003`](docs/commits/0003-live-budget.md) | Live-tab budget + score-based eviction. **Thesis validated** |
 | [`0004`](docs/commits/0004-snapshot-hibernation.md) | Screenshot-backed hibernation; teardown on by default |
+| [`0005`](docs/commits/0005-taskbar-low-power.md) | Taskbar, measured memory readout, low-power mode |
+
+### Low-power mode (commit `0005`)
+
+One tab on stackoverflow.com:
+
+| Configuration | Renderers | Memory |
+| --- | ---: | ---: |
+| normal | 14 | 1356 MB |
+| low power | **1** | **301 MB** (−78%) |
+| low power, blocking disabled *(control)* | 14 | 1243 MB |
+
+Commit `0003` found that no Chromium process-model switch has any effect through WebView2. But
+renderer count is a function of page *content*, and content an embedder controls completely — so
+low-power mode refuses cross-origin subframes and media at the request filter. The control run
+isolates the win to frame blocking rather than the tighter budget.
+
+It breaks things, deliberately and visibly: embedded video, OAuth logins, payment frames and
+CAPTCHAs all stop working. That is why it is a mode with a toggle, never a silent default.
 
 ### Measured (commit `0004`)
 

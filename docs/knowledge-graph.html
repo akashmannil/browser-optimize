@@ -364,7 +364,7 @@
 
 <script>
 const DATA = {
-  rev: "0004",
+  rev: "0005",
   nodeTypes: {
     problem:"An observed problem the project exists to solve",
     concept:"A mental model used to reason about the system",
@@ -421,6 +421,10 @@ const DATA = {
     {id:"commit.0002",type:"commit",label:"0002 — tab model",summary:"Tab abstraction and TabManager introduced; environment ownership moved out of the window. Its per-tab cost interpretation was retracted in 0003.",doc:"docs/commits/0002-tab-model.md"},
     {id:"commit.0003",type:"commit",label:"0003 — live budget and eviction",summary:"Live-tab budget with score-based eviction. Established that no Chromium process-model flag has any effect through WebView2, that eviction is therefore the only lever, and that under a fixed budget memory is fully decoupled from tab count.",doc:"docs/commits/0003-live-budget.md"},
     {id:"commit.0004",type:"commit",label:"0004 — screenshot-backed hibernation",summary:"Snapshot capture at blur, scroll replay on restore, placeholder painting during rebuild, and teardown enabled by default gated on holding a snapshot. Also corrected the measurement harness and re-measured — 0003's figures were sampled before runs had settled.",doc:"docs/commits/0004-snapshot-hibernation.md"},
+    {id:"d.content-blocking-is-the-indirect-lever",type:"decision",label:"Control renderer count through content, not the process model",summary:"Since no process-model API is available, low-power mode refuses cross-origin subframe documents and media at the WebResourceRequested filter instead. Renderer count is downstream of what a page is allowed to load, so declining the fan-out sources achieves the cap directly.",rationale:"Measured on one tab of stackoverflow.com — normal: 14 renderers / 1356 MB. Low power with blocking: 1 renderer / 301 MB (−78%). Low power with blocking DISABLED: 14 renderers / 1243 MB. That third run is the control: it isolates the win to frame blocking, not the tighter budget, which with a single tab never binds.",revisit_if:"WebView2 ever exposes real process pooling, at which point capping directly would beat breaking pages."},
+    {id:"k.frame-blocking-breaks-pages",type:"constraint",label:"Blocking cross-origin frames breaks real functionality",summary:"Refusing cross-origin subframes removes embedded video, OAuth and SSO login flows, comment widgets, payment frames, CAPTCHAs and map embeds. Some of these are the only route through a page.",discovered_in:"0005",implication:"This is why it is a MODE and never a silent default. A page that fails to log in with no explanation is worse than the memory it saves.",future:"A per-site allowlist would pass login and payment frames while still refusing ad and analytics frames — most of the win, much less breakage."},
+    {id:"cmp.memoryprobe",type:"component",label:"MemoryProbe",file:"src/Hearth/Core/MemoryProbe.cs",summary:"Samples the working set of Hearth's own process tree via a Toolhelp32 snapshot, walking descendants of the current PID. Makes the taskbar readout a measured figure rather than an estimate.",rationale:"Walks descendants rather than filtering every msedgewebview2.exe on the machine, because Windows runs other WebView2 apps whose memory is not ours to report.",invariant:"Never display a memory number this process has not actually observed."},
+    {id:"commit.0005",type:"commit",label:"0005 — taskbar and low-power mode",summary:"Replaced the developer status strip with a real taskbar: navigation, a measured memory readout in plain language, and a low-power toggle that cuts stackoverflow.com from 14 renderers to 1.",doc:"docs/commits/0005-taskbar-low-power.md"},
     {id:"cmp.snapshotstore",type:"component",label:"SnapshotStore",file:"src/Hearth/Core/SnapshotStore.cs",summary:"Captures and persists a tab's last painted frame plus its scroll offset, and replays the offset on rehydrate. What makes teardown survivable: an evicted tab renders its own last frame rather than going blank.",invariant:"Capture only ever happens at blur, on the outgoing tab, before any visibility change. Never write the capture stream straight to a file — buffer it and check for non-zero length first."}
   ],
   edges: [
@@ -492,7 +496,20 @@ const DATA = {
     ["cmp.snapshotstore","measured_by","m.restore-fidelity"],
     ["k.capture-requires-live","constrains","cmp.snapshotstore"],
     ["cmp.tabmanager","depends_on","cmp.snapshotstore"],
-    ["cmp.snapshotstore","introduced_in","commit.0004"]
+    ["cmp.snapshotstore","introduced_in","commit.0004"],
+    ["d.content-blocking-is-the-indirect-lever","motivated_by","k.no-process-model-control"],
+    ["d.content-blocking-is-the-indirect-lever","supersedes","api.additional-browser-arguments"],
+    ["d.content-blocking-is-the-indirect-lever","constrains","k.site-isolation-multiplies-renderers"],
+    ["d.content-blocking-is-the-indirect-lever","implements","c.hibernate-by-default"],
+    ["k.frame-blocking-breaks-pages","constrains","d.content-blocking-is-the-indirect-lever"],
+    ["cmp.tabmanager","implements","d.content-blocking-is-the-indirect-lever"],
+    ["cmp.memoryprobe","measured_by","m.reclaim-delta"],
+    ["cmp.memoryprobe","implements","k.no-per-tab-memory-api"],
+    ["p.invisible-cost","constrains","cmp.memoryprobe"],
+    ["cmp.mainwindow","depends_on","cmp.memoryprobe"],
+    ["cmp.memoryprobe","introduced_in","commit.0005"],
+    ["d.content-blocking-is-the-indirect-lever","introduced_in","commit.0005"],
+    ["k.frame-blocking-breaks-pages","introduced_in","commit.0005"]
   ]
 };
 

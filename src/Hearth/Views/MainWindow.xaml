@@ -83,34 +83,47 @@
                     Click="NewTab_Click" />
         </Grid>
 
-        <!-- Address bar -->
-        <Grid Grid.Row="1" Margin="8">
+        <!-- Taskbar -->
+        <Grid Grid.Row="1" Margin="8,4,8,8">
             <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
+            <StackPanel Grid.Column="0" Orientation="Horizontal" Margin="0,0,6,0">
+                <Button x:Name="BackButton"    Style="{StaticResource ToolButton}"
+                        Content="&#xE72B;" FontFamily="Segoe MDL2 Assets" FontSize="12"
+                        ToolTip="Back"    Click="Back_Click" />
+                <Button x:Name="ForwardButton" Style="{StaticResource ToolButton}"
+                        Content="&#xE72A;" FontFamily="Segoe MDL2 Assets" FontSize="12"
+                        ToolTip="Forward" Click="Forward_Click" />
+                <Button x:Name="ReloadButton"  Style="{StaticResource ToolButton}"
+                        Content="&#xE72C;" FontFamily="Segoe MDL2 Assets" FontSize="12"
+                        ToolTip="Reload"  Click="Reload_Click" />
+                <Button x:Name="HomeButton"    Style="{StaticResource ToolButton}"
+                        Content="&#xE80F;" FontFamily="Segoe MDL2 Assets" FontSize="12"
+                        ToolTip="Home"    Click="Home_Click" />
+            </StackPanel>
+
             <TextBox x:Name="AddressBar"
-                     Grid.Column="0"
+                     Grid.Column="1"
                      Background="{StaticResource ChromeField}"
                      Foreground="{StaticResource ChromeForeground}"
                      CaretBrush="{StaticResource ChromeForeground}"
                      BorderThickness="0"
-                     Padding="10,7"
+                     Padding="12,7"
                      FontSize="13"
                      VerticalContentAlignment="Center"
                      KeyDown="AddressBar_KeyDown" />
 
-            <Button Grid.Column="1"
-                    Content="Go"
-                    Margin="8,0,0,0"
-                    Padding="16,7"
-                    BorderThickness="0"
-                    Background="{StaticResource ChromeAccent}"
-                    Foreground="#1E1F22"
-                    FontWeight="SemiBold"
-                    Cursor="Hand"
-                    Click="GoButton_Click" />
+            <StackPanel Grid.Column="2" Orientation="Horizontal" Margin="6,0,0,0">
+                <ToggleButton x:Name="LowPowerToggle"
+                              Style="{StaticResource ModeToggle}"
+                              Content="Low power"
+                              ToolTip="Keep fewer pages awake and skip third-party embeds"
+                              Checked="LowPower_Changed" Unchecked="LowPower_Changed" />
+            </StackPanel>
         </Grid>
 
         <!-- Content host: every realised WebView2 lives here, only the active one
@@ -132,12 +145,35 @@
                    RenderOptions.BitmapScalingMode="HighQuality" />
         </Grid>
 
-        <!-- Status strip: becomes the live memory budget readout in commit 0005 -->
-        <Border Grid.Row="3" Background="{StaticResource ChromeField}" Padding="10,5">
-            <TextBlock x:Name="StatusText"
-                       Foreground="{StaticResource ChromeMuted}"
-                       FontSize="11"
-                       Text="Initialising WebView2 environment…" />
+        <!-- Memory strip. Deliberately always visible and stated in plain terms:
+             the cost of tabs is normally invisible, and a number nobody sees
+             cannot change behaviour (p.invisible-cost). Figures are measured
+             from our own process tree, never estimated. -->
+        <Border Grid.Row="3" Background="{StaticResource ChromeField}" Padding="12,6">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" Orientation="Horizontal">
+                    <TextBlock x:Name="MemoryText"
+                               Foreground="{StaticResource ChromeForeground}"
+                               FontSize="12" FontWeight="SemiBold"
+                               Text="—" />
+                    <TextBlock x:Name="TabsText"
+                               Foreground="{StaticResource ChromeMuted}"
+                               FontSize="12" Margin="10,0,0,0"
+                               Text="starting up…" />
+                </StackPanel>
+
+                <TextBlock Grid.Column="2"
+                           x:Name="SavedText"
+                           Foreground="{StaticResource ChromeMuted}"
+                           FontSize="11"
+                           HorizontalAlignment="Right" />
+            </Grid>
         </Border>
     </Grid>
 </Window>
