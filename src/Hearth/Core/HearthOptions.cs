@@ -12,11 +12,15 @@ public sealed record HearthOptions
     /// How many tabs may hold a full renderer at once. Activating a tab beyond
     /// this evicts the lowest-scoring live tab (see <see cref="EvictionPolicy"/>).
     ///
-    /// 6 is chosen to sit just above the number of tabs a person actively cycles
-    /// between. Too low and eviction thrashes on ordinary alt-tabbing; too high
-    /// and the budget stops binding at realistic tab counts.
+    /// 3 since commit 0008, down from 6. The number moved because the mode it
+    /// describes moved: up to 0007 this was the *normal* budget and 2 was the
+    /// low-power one behind a toggle. Browsing now runs at the lean setting by
+    /// default (d.lean-is-the-default), so this value is the lean one. Three
+    /// supports the pattern that is most of actual browsing -- the thing you are
+    /// reading, the thing you are referring to, and one more -- while still
+    /// binding hard enough to matter at realistic tab counts.
     /// </summary>
-    public int LiveTabBudget { get; init; } = 6;
+    public int LiveTabBudget { get; init; } = 3;
 
     /// <summary>
     /// Chromium's cap on concurrent renderer processes, passed via
@@ -83,27 +87,25 @@ public sealed record HearthOptions
     public bool AllowFullTeardown { get; init; } = true;
 
     /// <summary>
-    /// Live-tab budget while low-power mode is engaged. Deliberately tight: the
-    /// point of the mode is that the machine stops being the browser's, and a
-    /// budget of 2 still supports the read-here / reference-there pattern that
-    /// is most of actual browsing.
-    /// </summary>
-    public int LowPowerBudget { get; init; } = 2;
-
-    /// <summary>
-    /// In low-power mode, refuse cross-origin subframe documents and media.
+    /// Refuse cross-origin subframe documents and media.
     ///
     /// This is the indirect answer to k.no-process-model-control. We cannot cap
     /// renderers directly — every Chromium switch is ignored — but renderer
     /// count is a function of page CONTENT, and content is something an embedder
     /// absolutely can refuse. Cross-origin iframes are what fan a single tab out
-    /// into a dozen renderers, so declining them should cut process count
-    /// without any process-model API at all.
+    /// into a dozen renderers, so declining them cuts process count without any
+    /// process-model API at all: 14 renderers to 1, measured in 0005.
+    ///
+    /// ON by default since 0008 rather than behind a mode toggle. What changed
+    /// is not the risk — blocking still breaks logins and payment frames — but
+    /// that <see cref="SiteRules"/> now gives it a per-host escape hatch and the
+    /// shell surfaces what was refused. A default that announces itself and can
+    /// be overruled in one click is a different proposition from a silent one.
+    ///
+    /// Kept switchable (HEARTH_BLOCK_FRAMES=0) because it is the control run for
+    /// every memory measurement that claims filtering is what did the work.
     /// </summary>
     public bool BlockThirdPartyFrames { get; init; } = true;
-
-    /// <summary>Engage low-power mode at startup. Set by the benchmark harness.</summary>
-    public bool StartInLowPower { get; init; }
 
     public static HearthOptions Default { get; } = new();
 
@@ -138,13 +140,6 @@ public sealed record HearthOptions
 
         if (Flag("HEARTH_BLOCK_FRAMES") is { } blockFrames)
             options = options with { BlockThirdPartyFrames = blockFrames };
-
-        if (int.TryParse(Environment.GetEnvironmentVariable("HEARTH_LOW_POWER_BUDGET"),
-                out var lpBudget) && lpBudget > 0)
-            options = options with { LowPowerBudget = lpBudget };
-
-        if (Flag("HEARTH_LOW_POWER") is true)
-            options = options with { StartInLowPower = true };
 
         return options;
     }

@@ -28,6 +28,26 @@ public sealed class TabManager
     private readonly Task<CoreWebView2Environment> _environmentTask;
 
     /// <summary>
+    /// Which tab owns which renderer. WebResourceRequested hands back the
+    /// CoreWebView2 and nothing else, and that fires on every subresource of
+    /// every page, so resolving the tab by scanning the collection would put a
+    /// linear search on the hottest path in the app.
+    /// </summary>
+    private readonly Dictionary<CoreWebView2, BrowserTab> _owners = [];
+
+    /// <summary>
+    /// Closed tabs, most recent first, for Ctrl+Shift+T. Bounded because this is
+    /// an undo buffer and not a history feature — an unbounded one would quietly
+    /// retain every URL of the session with no way to clear it.
+    /// </summary>
+    private readonly List<ClosedTab> _closed = [];
+
+    private const int ClosedTabMemory = 25;
+
+    /// <summary>A tab that can be brought back: URL, title, and where it sat.</summary>
+    private readonly record struct ClosedTab(string Url, string Title, int Index);
+
+    /// <summary>
     /// Serialises budget enforcement. Activation is async and user-driven, so
     /// two rapid tab switches can otherwise interleave and evict past the budget
     /// or race on the same tab's controller.
@@ -67,11 +87,20 @@ public sealed class TabManager
     /// <summary>Tabs currently holding a full renderer. This is what the budget caps.</summary>
     public int LiveCount => _tabs.Count(t => t.State == TabState.Live);
 
-    /// <summary>Whether low-power mode is engaged.</summary>
-    public bool LowPower { get; private set; }
-
     /// <summary>Whether the full-screen tab wall is showing.</summary>
     public bool BigPicture { get; private set; }
+
+    /// <summary>Per-host exemptions from content filtering.</summary>
+    public SiteRules Rules { get; } = new();
+
+    /// <summary>
+    /// Raised when a tab has just been given a brand-new WebView2, so the shell
+    /// can hook things that live on the control rather than on the tab -- the
+    /// keyboard path in <see cref="ShortcutRouter"/> above all. Firing this only
+    /// for genuinely new controls, not for resumes, keeps handlers from stacking
+    /// up on a tab that is activated repeatedly.
+    /// </summary>
+    public event EventHandler<BrowserTab>? Realised;
 
     /// <summary>
     /// The budget actually in force. Big Picture pins it to one: you are looking
@@ -79,9 +108,7 @@ public sealed class TabManager
     /// aesthetic and the memory architecture want the same thing here, which is
     /// the reason this mode is worth having at all rather than being a skin.
     /// </summary>
-    public int EffectiveBudget => BigPicture
-        ? 1
-        : LowPower ? _options.LowPowerBudget : _options.LiveTabBudget;
+    public int EffectiveBudget => BigPicture ? 1 : _options.LiveTabBudget;
 
     /// <summary>
     /// Enters or leaves Big Picture. On entry the active tab is captured first,
@@ -131,36 +158,31 @@ public sealed class TabManager
     }
 
     /// <summary>
-    /// Engages or releases low-power mode. Content filtering only affects
-    /// requests made from now on, so the active tab is reloaded to give the
-    /// change an immediate, visible effect rather than one that arrives
-    /// silently three navigations later.
+    /// Exempts the active tab's host from content filtering and reloads it, so
+    /// the thing the user was trying to do actually works on the retry rather
+    /// than on their next visit. Filtering only affects requests made from now
+    /// on, so without the reload the grant would appear to do nothing.
     /// </summary>
-    public async Task SetLowPowerAsync(bool on)
+    public void AllowActiveSite()
     {
-        if (LowPower == on) return;
-        LowPower = on;
+        if (Active is not { } tab) return;
 
-        foreach (var tab in _tabs)
-            if (tab.View?.CoreWebView2 is { } core) ApplyContentPolicy(core);
-
-        await _budgetGate.WaitAsync();
-        try { await EnforceBudgetAsync(); }
-        finally { _budgetGate.Release(); }
-
-        if (Active?.View?.CoreWebView2 is { } activeCore) activeCore.Reload();
-
+        Rules.Allow(SiteRules.HostOf(tab.Url));
+        tab.BlockedCount = 0;
+        tab.View?.CoreWebView2?.Reload();
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>
-    /// Installs or clears the low-power request filter on a realised tab.
-    /// Registering the filter is idempotent, so the handler alone is toggled.
+    /// Installs the request filter on a realised tab. Registering a filter is
+    /// idempotent; the handler is what actually decides anything, and it defers
+    /// to <see cref="SiteRules"/> per request rather than being torn down and
+    /// rebuilt when a rule changes.
     /// </summary>
     private void ApplyContentPolicy(CoreWebView2 core)
     {
         core.WebResourceRequested -= OnWebResourceRequested;
-        if (!LowPower || !_options.BlockThirdPartyFrames) return;
+        if (!_options.BlockThirdPartyFrames) return;
 
         core.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.Document);
         core.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.Media);
@@ -170,28 +192,91 @@ public sealed class TabManager
     private void OnWebResourceRequested(object? sender, CoreWebView2WebResourceRequestedEventArgs e)
     {
         if (sender is not CoreWebView2 core) return;
+        if (!_owners.TryGetValue(core, out var tab)) return;
 
-        // Media is refused outright in low-power mode: autoplaying video is the
-        // single most expensive thing a background page can do.
-        if (e.ResourceContext == CoreWebView2WebResourceContext.Media)
+        // A host the user has explicitly unlocked loads exactly as it would in
+        // any other browser. Checked per request rather than per navigation so a
+        // grant takes effect on the reload that follows it.
+        if (Rules.IsAllowed(SiteRules.HostOf(tab.Url))) return;
+
+        // Ask Chromium what the request is, instead of inferring it.
+        //
+        // The first version of this compared the request's host against
+        // core.Source, and it blocked the top-level navigation of every tab:
+        // when the very first document request goes out, core.Source is still
+        // about:blank, so "differs from the current page" is trivially true.
+        // Filtering was previously only ever switched on mid-session, after a
+        // page had committed, which hid the bug completely until 0008 made it
+        // the default (k.source-is-stale-during-navigation).
+        //
+        // Sec-Fetch-Dest and Sec-Fetch-Site are computed by the engine on every
+        // request and do not depend on any state we have to track: Dest says
+        // what the request is for, Site says how far it reaches. A top-level
+        // navigation is dest=document, and it is never refused.
+        var dest = Header(e, "Sec-Fetch-Dest");
+        var site = Header(e, "Sec-Fetch-Site");
+
+        if (dest is not null)
         {
-            e.Response = core.Environment.CreateWebResourceResponse(null, 204, "Blocked", "");
+            if (dest is "document") return;
+
+            var crossSite = site is "cross-site";
+            var isSubframe = dest is "iframe" or "frame";
+            var isMedia = dest is "audio" or "video"
+                          || e.ResourceContext == CoreWebView2WebResourceContext.Media;
+
+            // Only cross-site media is refused. Same-origin media costs no extra
+            // renderer -- the 0005 win came from frames, proven by that commit's
+            // control run -- so blocking a page's own audio player would break
+            // sites for nothing.
+            if ((isSubframe || isMedia) && crossSite) Refuse(e, tab, core);
             return;
         }
 
-        if (e.ResourceContext != CoreWebView2WebResourceContext.Document) return;
+        // Fallback for requests that carry no Sec-Fetch headers. tab.Url is the
+        // authoritative top-level URL here, kept current by NavigationStarting;
+        // core.Source is not (see above).
+        if (e.ResourceContext is not (CoreWebView2WebResourceContext.Document
+            or CoreWebView2WebResourceContext.Media)) return;
 
-        // A Document request whose host differs from the top-level page is a
-        // cross-origin subframe — an ad, a widget, an embedded player. Each one
-        // costs a dedicated renderer under site isolation.
+        if (!Uri.TryCreate(tab.Url, UriKind.Absolute, out var top)) return;
+        if (string.IsNullOrEmpty(top.Host)) return;
         if (!Uri.TryCreate(e.Request.Uri, UriKind.Absolute, out var requested)) return;
-        if (!Uri.TryCreate(core.Source, UriKind.Absolute, out var top)) return;
         if (string.Equals(requested.Host, top.Host, StringComparison.OrdinalIgnoreCase)) return;
 
         // Never block the top-level navigation itself.
-        if (string.Equals(e.Request.Uri, core.Source, StringComparison.OrdinalIgnoreCase)) return;
+        if (string.Equals(e.Request.Uri, tab.Url, StringComparison.OrdinalIgnoreCase)) return;
 
+        Refuse(e, tab, core);
+    }
+
+    private static string? Header(CoreWebView2WebResourceRequestedEventArgs e, string name)
+    {
+        try
+        {
+            return e.Request.Headers.Contains(name) ? e.Request.Headers.GetHeader(name) : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Declines a request and tells the owning tab it happened. The count is
+    /// what the shield binds to — a filter nobody can see is indistinguishable
+    /// from a broken page (d.filtering-needs-an-escape-hatch).
+    /// </summary>
+    private void Refuse(
+        CoreWebView2WebResourceRequestedEventArgs e, BrowserTab tab, CoreWebView2 core)
+    {
         e.Response = core.Environment.CreateWebResourceResponse(null, 204, "Blocked", "");
+
+        _contentHost.Dispatcher.BeginInvoke(() =>
+        {
+            tab.BlockedCount++;
+            Changed?.Invoke(this, EventArgs.Empty);
+        });
     }
 
     /// <summary>Tabs suspended but still holding a controller.</summary>
@@ -373,6 +458,7 @@ public sealed class TabManager
         await view.EnsureCoreWebView2Async(environment);
 
         var core = view.CoreWebView2;
+        _owners[core] = tab;
         ApplyContentPolicy(core);
 
         core.DocumentTitleChanged += (_, _) =>
@@ -386,6 +472,21 @@ public sealed class TabManager
         {
             tab.Url = core.Source;
             Changed?.Invoke(this, EventArgs.Empty);
+        };
+
+        // NavigationStarting fires only for the top-level document (frames go to
+        // FrameNavigationStarting), so this is the earliest and most reliable
+        // point at which the tab's own URL is known. The content filter reads it
+        // to decide what counts as cross-site, and it has to be right BEFORE the
+        // page's subresources start arriving.
+        core.NavigationStarting += (_, e) =>
+        {
+            tab.Url = e.Uri;
+
+            // A blocked-request count belongs to one page. Carried across a
+            // navigation it would describe the previous page, and the shield
+            // would offer to unlock a site no longer on screen.
+            if (!e.IsRedirected) tab.BlockedCount = 0;
         };
 
         // Returning a rehydrated tab to the top of the page is the most-noticed
@@ -403,6 +504,11 @@ public sealed class TabManager
 
         core.Navigate(tab.Url);
         tab.State = TabState.Live;
+
+        // Last, so handlers see a fully wired tab. This is where the keyboard
+        // path gets attached to the new control (k.two-keyboard-paths); miss it
+        // and shortcuts stop working the moment focus enters this tab.
+        Realised?.Invoke(this, tab);
     }
 
     public void Navigate(BrowserTab tab, string url)
@@ -413,7 +519,11 @@ public sealed class TabManager
 
     public void Close(BrowserTab tab)
     {
-        if (!_tabs.Remove(tab)) return;
+        var index = _tabs.IndexOf(tab);
+        if (index < 0 || !_tabs.Remove(tab)) return;
+
+        _closed.Insert(0, new ClosedTab(tab.Url, tab.Title, index));
+        if (_closed.Count > ClosedTabMemory) _closed.RemoveAt(_closed.Count - 1);
 
         Destroy(tab);
         Snapshots.Forget(tab.Id);
@@ -421,11 +531,39 @@ public sealed class TabManager
         if (ReferenceEquals(Active, tab))
         {
             Active = null;
-            var next = _tabs.LastOrDefault();
+
+            // The neighbour, not the last tab in the strip. Closing tab 3 of 9
+            // and landing on tab 9 loses the user's place in whatever they were
+            // working through; landing on tab 3 keeps it.
+            var next = _tabs.ElementAtOrDefault(Math.Min(index, _tabs.Count - 1));
             if (next is not null) _ = ActivateAsync(next);
         }
 
         Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>True when there is anything for Ctrl+Shift+T to bring back.</summary>
+    public bool CanReopenClosed => _closed.Count > 0;
+
+    /// <summary>
+    /// Reopens the most recently closed tab at the position it was closed from.
+    /// Only URL and title come back — the renderer was destroyed and its
+    /// snapshot deliberately deleted with it, so this is a fresh load, not a
+    /// restore. Claiming otherwise would be exactly the over-promise that makes
+    /// people distrust every other tab suspender (p.lossy-restore).
+    /// </summary>
+    public BrowserTab? ReopenLastClosed()
+    {
+        if (_closed.Count == 0) return null;
+
+        var entry = _closed[0];
+        _closed.RemoveAt(0);
+
+        var tab = new BrowserTab(entry.Url) { Title = entry.Title };
+        _tabs.Insert(Math.Clamp(entry.Index, 0, _tabs.Count), tab);
+
+        _ = ActivateAsync(tab);
+        return tab;
     }
 
     /// <summary>
@@ -437,10 +575,16 @@ public sealed class TabManager
     {
         if (tab.View is null) return;
 
+        // Drop the ownership entry before disposing: the dictionary is keyed on
+        // the CoreWebView2, and reading that property off a disposed control
+        // throws.
+        if (tab.View.CoreWebView2 is { } core) _owners.Remove(core);
+
         _contentHost.Children.Remove(tab.View);
         tab.View.Dispose();
         tab.View = null;
         tab.State = TabState.Cold;
+        tab.BlockedCount = 0;
 
         // A rebuilt tab has not painted again yet, so it is not photographable
         // until its next navigation completes.

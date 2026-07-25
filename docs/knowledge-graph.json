@@ -2,9 +2,8 @@
   "project": "hearth",
   "description": "A low-resource Windows browser shell built on WebView2, whose core bet is that hibernated is a tab's default state and live is a budgeted exception.",
   "schema_version": "1.0",
-  "graph_updated_at_commit": "0007",
+  "graph_updated_at_commit": "0008",
   "consumer_notes": "This file is the authoritative machine-readable model of WHY this codebase is shaped the way it is. Source code records what the system does; this graph records the reasoning, the rejected alternatives, and the constraints that must not be violated. Agents should read this before proposing architectural changes. Every node has a stable `id` that is safe to reference in commits, issues, and other documents. When you add a feature, add its nodes/edges here in the same commit.",
-
   "node_types": {
     "problem": "An observed user-facing or system-level problem the project exists to solve.",
     "concept": "A domain idea or mental model used to reason about the system.",
@@ -15,7 +14,6 @@
     "metric": "A measurable quantity used to validate the design.",
     "commit": "A unit of work in this repository's history."
   },
-
   "edge_types": {
     "motivated_by": "Source exists because of target.",
     "implements": "Source is the concrete realisation of target.",
@@ -26,7 +24,6 @@
     "introduced_in": "Source first appeared in target commit.",
     "supersedes": "Source replaces target."
   },
-
   "nodes": [
     {
       "id": "p.tab-hoarding",
@@ -52,7 +49,6 @@
       "label": "Tab archivers become graveyards",
       "summary": "OneTab, Session Buddy and Toby convert a visible anxious pile into an invisible list nobody revisits. Users intuit this and resist adoption, correctly."
     },
-
     {
       "id": "c.process-overhead-dominates",
       "type": "concept",
@@ -89,7 +85,6 @@
       "summary": "Every other browser treats loaded as default and unloading as an emergency. Chrome Memory Saver and Firefox tab unloading are REACTIVE, triggering only under memory pressure. Hearth inverts this: tabs are documents on disk that get temporarily instantiated, under a hard budget.",
       "is_core_thesis": true
     },
-
     {
       "id": "d.webview2-shell",
       "type": "decision",
@@ -113,7 +108,6 @@
       "rationale": "This is the single highest-leverage line of code in the project.",
       "invariant": "Never call EnsureCoreWebView2Async without passing the shared environment."
     },
-
     {
       "id": "k.no-per-tab-memory-api",
       "type": "constraint",
@@ -143,7 +137,6 @@
       "violated_in_0004": "The first implementation captured inside HibernateAsync, which runs AFTER ActivateAsync has already collapsed the outgoing tab. A collapsed controller has nothing to photograph, so every capture produced a 0-byte file. Fixed by capturing the outgoing tab in ActivateAsync before any visibility change. Recorded because the constraint was written down first and still got violated -- the correct place to capture is not where eviction happens, it is where focus leaves.",
       "corollary": "Never write a captured file directly from the capture stream. A failed capture leaves a 0-byte PNG that is indistinguishable from a real snapshot at the call site, and would license a teardown that cannot be repainted. Buffer in memory and only write on non-zero length."
     },
-
     {
       "id": "k.site-isolation-multiplies-renderers",
       "type": "constraint",
@@ -180,8 +173,8 @@
       "label": "Blocking cross-origin frames breaks real functionality",
       "summary": "Refusing cross-origin subframes removes embedded video players, OAuth and SSO login flows, comment widgets, payment frames, CAPTCHAs and map embeds. These are not incidental -- some are the only route through a page.",
       "discovered_in": "0005",
-      "implication": "This is why it is a MODE and not a default. Low power is an explicit user choice with a visible, engaged-looking toggle; it must never be entered silently, because a page failing to log in with no explanation is worse than the memory it saves.",
-      "future": "A per-site allowlist would let login and payment frames through while still refusing ad and analytics frames -- most of the memory win with much less breakage."
+      "implication": "Through 0007 this is why it was a MODE and not a default. Since 0008 it IS the default, which is only defensible because d.filtering-needs-an-escape-hatch gives a user who hits a broken login both an explanation and a one-click remedy in the same place.",
+      "resolved_in": "0008"
     },
     {
       "id": "d.eviction-is-the-only-lever",
@@ -229,7 +222,6 @@
       "summary": "Hints to the runtime that a WebView2 should minimise memory usage. Cheaper and lower-fidelity than TrySuspend; usable as an intermediate tier for recently-blurred tabs.",
       "docs": "https://learn.microsoft.com/dotnet/api/microsoft.web.webview2.core.corewebview2.memoryusagetargetlevel"
     },
-
     {
       "id": "m.steady-state-ceiling",
       "type": "metric",
@@ -244,25 +236,64 @@
       },
       "measured_0003": {
         "method": "8 real sites, every tab activated in turn via HEARTH_ACTIVATE_ALL, working set summed over the WebView2 process tree filtered to Hearth's own user-data-dir.",
-        "budget_8_no_eviction": { "renderers": 21, "total_mb": 1823.3 },
-        "budget_3_trysuspend":   { "renderers": 10, "total_mb": 1187.6, "reduction_pct": 35 },
-        "budget_3_teardown":     { "renderers": 5,  "total_mb": 854.0,  "reduction_pct": 53 },
-        "budget_1_teardown":     { "renderers": 2,  "total_mb": 627.7,  "reduction_pct": 66 }
+        "budget_8_no_eviction": {
+          "renderers": 21,
+          "total_mb": 1823.3
+        },
+        "budget_3_trysuspend": {
+          "renderers": 10,
+          "total_mb": 1187.6,
+          "reduction_pct": 35
+        },
+        "budget_3_teardown": {
+          "renderers": 5,
+          "total_mb": 854.0,
+          "reduction_pct": 53
+        },
+        "budget_1_teardown": {
+          "renderers": 2,
+          "total_mb": 627.7,
+          "reduction_pct": 66
+        }
       },
       "measured_0004": {
         "method": "Corrected harness: ONE build, 95s settle, only the teardown flag varied. Supersedes measured_0003, which sampled at 40s before the activation sequence had finished loading all 8 tabs and therefore compared partially-loaded runs.",
-        "baseline_no_eviction": { "renderers": 22, "total_mb": 2233.8 },
-        "budget_3_suspend":     { "renderers": 15, "total_mb": 1519.6, "reduction_pct": 32 },
-        "budget_3_teardown":    { "renderers": 8,  "total_mb": 1149.7, "reduction_pct": 49 },
-        "budget_1_teardown":    { "renderers": 2,  "total_mb": 625.0,  "reduction_pct": 72 },
+        "baseline_no_eviction": {
+          "renderers": 22,
+          "total_mb": 2233.8
+        },
+        "budget_3_suspend": {
+          "renderers": 15,
+          "total_mb": 1519.6,
+          "reduction_pct": 32
+        },
+        "budget_3_teardown": {
+          "renderers": 8,
+          "total_mb": 1149.7,
+          "reduction_pct": 49
+        },
+        "budget_1_teardown": {
+          "renderers": 2,
+          "total_mb": 625.0,
+          "reduction_pct": 72
+        },
         "note": "The baseline is higher than 0003's (2234 vs 1823 MB) because every tab now fully loads before sampling. Reduction percentages hold their shape, and the deepest budget improved from 66% to 72%. Conclusions from 0003 are unchanged; only the numbers are now trustworthy.",
         "harness_fix": "HEARTH_FULL_TEARDOWN was previously settable only to ON, making it impossible to A/B against its own absence on a single build. Now bidirectional. A flag that cannot be turned off cannot be measured."
       },
       "flatness_0003": {
         "method": "budget=3, full teardown, tab count varied.",
-        "4_tabs":  { "renderers": 3, "total_mb": 751.9 },
-        "8_tabs":  { "renderers": 5, "total_mb": 910.8 },
-        "16_tabs": { "renderers": 3, "total_mb": 548.0 },
+        "4_tabs": {
+          "renderers": 3,
+          "total_mb": 751.9
+        },
+        "8_tabs": {
+          "renderers": 5,
+          "total_mb": 910.8
+        },
+        "16_tabs": {
+          "renderers": 3,
+          "total_mb": 548.0
+        },
         "interpretation": "Memory is decoupled from tab count. 16 tabs cost LESS than 4 because the residual variance is driven by which pages happen to be live at the end, not how many tabs exist. This is the core thesis validated."
       }
     },
@@ -283,7 +314,6 @@
       "summary": "Working-set bytes returned to the OS by evicting one tab. Doubles as the per-tab cost estimate that makes the invisible cost legible to users.",
       "status": "not-yet-measured"
     },
-
     {
       "id": "cmp.app",
       "type": "component",
@@ -298,7 +328,6 @@
       "file": "src/Hearth/Views/MainWindow.xaml.cs",
       "summary": "Application shell. At commit 0001 it hosts a single WebView2 and creates the shared environment, proving the toolchain. Becomes the tab-strip host in later commits."
     },
-
     {
       "id": "cmp.tabstate",
       "type": "component",
@@ -487,147 +516,863 @@
       "file": "src/Hearth/Core/EvictionPolicy.cs",
       "summary": "Scores live tabs worst-first. Recency decays as 1/(1+idleMinutes) and is weighted by log(1+activationCount), so a reference doc reopened twenty times outranks an article opened once and abandoned. Never-activated tabs score negative infinity and are evicted first.",
       "future": "This is where c.refindability lands: a filtered dashboard view or half-filled form must resist eviction far harder than a homepage, because being wrong costs a loss rather than a reload."
+    },
+    {
+      "id": "k.two-keyboard-paths",
+      "type": "constraint",
+      "label": "Keyboard input reaches the shell by two separate paths, and WPF alone is deaf",
+      "summary": "WebView2 is out-of-process: the HWND holding keyboard focus is created by msedgewebview2.exe, so its WM_KEYDOWN messages queue to THAT process's thread. Window.PreviewKeyDown therefore never fires while a page has focus, and no thread-level message filter can help either -- there is no message on our thread to filter. Page keys arrive only via CoreWebView2Controller.AcceleratorKeyPressed.",
+      "discovered_in": "0008",
+      "implication": "Any keyboard feature must be wired on BOTH paths and resolve through one shared map, or it will work in the address bar and silently do nothing on a page.",
+      "why_it_hid": "After startup, focus sits on the address bar. Every manual test that pressed a key without first clicking into the page exercised the one path that already worked.",
+      "invariant": "ShortcutRouter.Map is static and pure, and is the only place a key becomes a command."
+    },
+    {
+      "id": "k.wpf-wrapper-hides-controller",
+      "type": "constraint",
+      "label": "The WPF WebView2 wrapper does not expose CoreWebView2Controller",
+      "summary": "Microsoft.Web.WebView2.Wpf.WebView2 surfaces CoreWebView2 but not the controller that owns AcceleratorKeyPressed, ZoomFactorChanged bounds and visibility. The controller lives on a private field m_webview2Base, whose CoreWebView2Controller property is internal. Verified by reflecting over the pinned 1.0.4078.44 assembly.",
+      "discovered_in": "0008",
+      "implication": "Page-level keyboard handling requires reflection. It is cached once per process and fail-soft: a failed lookup degrades shortcuts to chrome-only and logs, rather than throwing at startup.",
+      "risk": "This is the only place in the codebase reaching into SDK internals. It is why the WebView2 package version is pinned rather than floating, and it is checked at startup so a break is visible instead of silent."
+    },
+    {
+      "id": "k.double-dispatch-on-page-keys",
+      "type": "constraint",
+      "label": "Both keyboard paths fire for the same keystroke",
+      "summary": "With the native hook attached, a key pressed on a page is delivered twice: the WPF wrapper re-raises it into the WPF tree AND the controller reports it natively, about 4 ms apart. Measured directly -- one Ctrl+T opened two tabs.",
+      "discovered_in": "0008",
+      "implication": "The chrome path must decline any keystroke that originated in web content, but only while the native hook is known to be working.",
+      "the_trap": "IsKeyboardFocusWithin reports False and Keyboard.FocusedElement is null while a page holds focus. Neither is a bug -- WPF genuinely does not have focus -- which is precisely why neither can be used to detect that it does not. e.OriginalSource is the WebView2 and is the only reliable discriminator."
+    },
+    {
+      "id": "k.source-is-stale-during-navigation",
+      "type": "constraint",
+      "label": "CoreWebView2.Source is still about:blank when a tab's first request goes out",
+      "summary": "WebResourceRequested for the top-level document fires before the navigation commits, so Source has not yet become the target URL. Any 'is this request same-origin with the current page' test written against Source therefore refuses the page's own navigation.",
+      "discovered_in": "0008",
+      "implication": "This shipped in 0005 and was invisible for three commits, because filtering could only be engaged mid-session -- by which time a page had committed and Source was real. Making it the default surfaced it as a blank page on every tab.",
+      "lesson": "A bug that only appears when a feature becomes the default was always there; being a mode was hiding it. Moving anything to on-by-default is a re-test of everything it touches, not a config change."
+    },
+    {
+      "id": "d.lean-is-the-default",
+      "type": "decision",
+      "label": "Browsing runs lean by default; there is no low-power toggle",
+      "summary": "The live budget is 3 and content filtering is on from startup, with no mode control in the chrome. What used to be 'low power' is simply what the browser is; commit 0009 adds immersion as the opposite pole, entered deliberately.",
+      "rationale": "c.hibernate-by-default says hibernated is a tab's default state. A browser that only honours that once the user finds a toggle does not hold the thesis -- it offers it. The product promise is a RAM ceiling respected by construction, and a ceiling that ships switched off is not a ceiling.",
+      "supersedes_reasoning": "0005 made this a mode because blocking breaks logins with no recourse. That reasoning was correct and is not being dismissed: it is answered by d.filtering-needs-an-escape-hatch, which is the per-site allowlist 0005 itself recorded as the way out.",
+      "revisit_if": "Users are found clicking the shield on most sites they visit. That would mean the default is wrong rather than merely strict, and the honest response is a looser default filter, not a louder shield."
+    },
+    {
+      "id": "d.filtering-needs-an-escape-hatch",
+      "type": "decision",
+      "label": "A default that breaks pages must announce itself and be overridable in one click",
+      "summary": "SiteRules holds a persistent per-host allowlist. The tab counts refused requests, the shield appears in the address bar only when the count is non-zero, and one click exempts the host permanently and reloads.",
+      "rationale": "Filtering can only be a default if a user who hits a broken login has an explanation and a remedy in the same place. A permanently visible badge is wallpaper; one that appears exactly when a button stops responding is the explanation needed at that moment. Cost of the hatch is one click per site, paid once. Cost of not having it is the whole feature being switched off.",
+      "measured_0008": "Granting stackoverflow.com took the page from 1 renderer back to 14, and the status bar from 719 MB to 1.6 GB. Making that jump visible is the point, not a side effect.",
+      "revisit_if": "Grants need scoping ('just this once', or per-frame rather than per-host), or a UI to review and revoke them. Today the only way to revoke is to delete store/site-rules.json."
+    },
+    {
+      "id": "d.engine-labels-over-inference",
+      "type": "decision",
+      "label": "Classify requests with Sec-Fetch headers, not by comparing URLs",
+      "summary": "The content filter reads Sec-Fetch-Dest (what the request is for) and Sec-Fetch-Site (how far it reaches) rather than inferring a request's role from its URL against the tab's current one. dest=document is never refused; dest=iframe with site=cross-site is.",
+      "rationale": "Chromium computes these on every request and they depend on no state the embedder has to keep correct. The URL-comparison version needed Source to be current, and k.source-is-stale-during-navigation says it is not. Asking the engine what a request IS removes a whole class of ordering bug rather than fixing one instance of it.",
+      "side_effect": "The rewrite narrowed media blocking to cross-site only. Same-origin media costs no extra renderer -- 0005's control run located the win in frames -- so refusing a page's own audio player broke sites in exchange for nothing.",
+      "revisit_if": "A request needs blocking that carries no Sec-Fetch headers. A host-comparison fallback against tab.Url is retained for exactly that case."
+    },
+    {
+      "id": "cmp.shortcutrouter",
+      "type": "component",
+      "label": "ShortcutRouter",
+      "file": "src/Hearth/Core/ShortcutRouter.cs",
+      "summary": "One key map served down two delivery paths: HandleWpfKey for chrome focus and Attach for page focus. Reaches CoreWebView2Controller by cached, fail-soft reflection, reads modifiers from the OS rather than from WPF, and declines chrome-path keys that originated in web content.",
+      "invariant": "Map is static and pure. Both paths must resolve through it; a second key-to-command table anywhere is a bug."
+    },
+    {
+      "id": "cmp.siterules",
+      "type": "component",
+      "label": "SiteRules",
+      "file": "src/Hearth/Core/SiteRules.cs",
+      "summary": "Persistent per-host allowlist at store/site-rules.json. Hosts are normalised with www stripped so one grant covers what a user considers one site. A corrupt file costs the exemptions, never the launch.",
+      "rationale": "This is the component that makes filtering-by-default defensible rather than merely aggressive."
+    },
+    {
+      "id": "cmp.diag",
+      "type": "component",
+      "label": "Diag",
+      "file": "src/Hearth/Core/Diag.cs",
+      "summary": "Opt-in trace log at store/trace.log, enabled by HEARTH_TRACE=1. Off by default; tracing never throws.",
+      "rationale": "0008's central claim -- that a keystroke landing on a page reaches the shell -- cannot be checked by reading code or looking at the window, because both paths look identical from outside and the failure mode is silence. This is the instrument that makes the keyboard claim measurable rather than asserted."
+    },
+    {
+      "id": "m.filtering-reclaim",
+      "type": "metric",
+      "label": "Memory reclaimed by content filtering, as a default",
+      "summary": "One tab on stackoverflow.com, one Debug build, 90 s settle, only HEARTH_BLOCK_FRAMES varying. Filtering on: 1 renderer / 719 MB. Filtering off (control): 14 renderers / 1599 MB, a 55% reduction. Granting the site via the shield returns it to 14 renderers / 1.6 GB.",
+      "status": "measured-0008",
+      "caveat": "Debug build, and the total includes Hearth's own WPF process, so absolute figures are NOT comparable with 0005's 301 MB / 1356 MB. The within-run control is what the claim rests on.",
+      "confirms": "Reproduces 0005's 14-to-1 renderer result under the narrower cross-site-only rule, showing the narrowing cost nothing."
+    },
+    {
+      "id": "commit.0008",
+      "type": "commit",
+      "label": "0008 - keyboard and lean default",
+      "summary": "Browser keyboard shortcuts wired on both delivery paths and verified through the real OS input stack; low-power toggle removed and lean made the default; per-host allowlist and address-bar shield added; content filter rewritten onto Sec-Fetch headers after it was found blocking top-level navigations.",
+      "doc": "docs/commits/0008-keyboard-and-lean-default.md"
     }
   ],
-
   "edges": [
-    { "from": "p.tab-hoarding",        "rel": "motivated_by",           "to": "p.archive-blackhole",       "note": "Users resist archiving precisely because archives are not trustworthy retrieval." },
-    { "from": "c.hibernate-by-default","rel": "motivated_by",           "to": "p.tab-hoarding" },
-    { "from": "c.hibernate-by-default","rel": "motivated_by",           "to": "c.process-overhead-dominates" },
-    { "from": "c.hibernate-by-default","rel": "depends_on",             "to": "c.ram-for-disk-trade" },
-    { "from": "c.hibernate-by-default","rel": "measured_by",            "to": "m.steady-state-ceiling" },
-    { "from": "c.hibernate-by-default","rel": "measured_by",            "to": "m.restore-fidelity" },
-
-    { "from": "p.lossy-restore",       "rel": "constrains",             "to": "c.hibernate-by-default",    "note": "Eviction is only acceptable if restore is indistinguishable from never having left." },
-    { "from": "k.capture-requires-live","rel": "constrains",            "to": "api.capturepreview" },
-
-    { "from": "d.webview2-shell",      "rel": "motivated_by",           "to": "c.hibernate-by-default" },
-    { "from": "d.webview2-shell",      "rel": "depends_on",             "to": "api.trysuspend" },
-    { "from": "d.webview2-shell",      "rel": "depends_on",             "to": "api.capturepreview" },
-    { "from": "d.webview2-shell",      "rel": "depends_on",             "to": "api.memory-target-level" },
-    { "from": "k.windows-only",        "rel": "constrains",             "to": "d.webview2-shell" },
-    { "from": "k.widevine-drm",        "rel": "constrains",             "to": "d.webview2-shell" },
-
-    { "from": "d.shared-environment",  "rel": "motivated_by",           "to": "c.process-overhead-dominates" },
-    { "from": "d.shared-environment",  "rel": "implements",             "to": "c.hibernate-by-default" },
-    { "from": "cmp.mainwindow",        "rel": "implements",             "to": "d.shared-environment" },
-    { "from": "cmp.mainwindow",        "rel": "depends_on",             "to": "cmp.app" },
-
-    { "from": "k.no-per-tab-memory-api","rel": "constrains",            "to": "m.reclaim-delta" },
-    { "from": "p.invisible-cost",      "rel": "measured_by",            "to": "m.reclaim-delta" },
-
-    { "from": "d.dotnet-wpf",          "rel": "implements",             "to": "d.webview2-shell" },
-
-    { "from": "cmp.app",               "rel": "introduced_in",          "to": "commit.0001" },
-    { "from": "cmp.mainwindow",        "rel": "introduced_in",          "to": "commit.0001" },
-
-    { "from": "cmp.tabmanager",        "rel": "implements",             "to": "d.shared-environment", "note": "Supersedes MainWindow as the environment owner." },
-    { "from": "cmp.tabmanager",        "rel": "supersedes",             "to": "cmp.mainwindow",       "note": "For environment ownership only; MainWindow remains the shell." },
-    { "from": "cmp.tabmanager",        "rel": "depends_on",             "to": "cmp.browsertab" },
-    { "from": "cmp.browsertab",        "rel": "depends_on",             "to": "cmp.tabstate" },
-    { "from": "cmp.browsertab",        "rel": "implements",             "to": "c.hibernate-by-default", "note": "Nullable View encodes 'a tab is a document, a renderer is a cache'." },
-    { "from": "cmp.tabstate",          "rel": "implements",             "to": "c.hibernate-by-default" },
-
-    { "from": "k.site-isolation-multiplies-renderers", "rel": "constrains", "to": "d.shared-environment", "note": "A shared environment guarantees one BROWSER process, not one renderer per tab." },
-    { "from": "k.site-isolation-multiplies-renderers", "rel": "constrains", "to": "m.steady-state-ceiling" },
-    { "from": "k.site-isolation-multiplies-renderers", "rel": "motivated_by", "to": "c.process-overhead-dominates" },
-    { "from": "api.additional-browser-arguments",      "rel": "constrains", "to": "k.site-isolation-multiplies-renderers", "note": "--renderer-process-limit is the only embedder-side lever." },
-    { "from": "d.webview2-shell",      "rel": "depends_on",             "to": "api.additional-browser-arguments" },
-
-    { "from": "cmp.tabstate",          "rel": "introduced_in",          "to": "commit.0002" },
-    { "from": "cmp.browsertab",        "rel": "introduced_in",          "to": "commit.0002" },
-    { "from": "cmp.tabmanager",        "rel": "introduced_in",          "to": "commit.0002" },
-    { "from": "k.site-isolation-multiplies-renderers", "rel": "introduced_in", "to": "commit.0002" },
-
-    { "from": "k.no-process-model-control", "rel": "supersedes",   "to": "api.additional-browser-arguments", "note": "The API exists and is plumbed correctly; Chromium ignores what it carries." },
-    { "from": "k.no-process-model-control", "rel": "constrains",   "to": "d.webview2-shell",                 "note": "Strongest argument yet that WebView2 is a staging post, not the destination." },
-    { "from": "k.no-process-model-control", "rel": "motivated_by", "to": "k.site-isolation-multiplies-renderers" },
-    { "from": "d.eviction-is-the-only-lever", "rel": "motivated_by", "to": "k.no-process-model-control" },
-    { "from": "d.eviction-is-the-only-lever", "rel": "implements",   "to": "c.hibernate-by-default" },
-    { "from": "d.eviction-is-the-only-lever", "rel": "rejected_in_favour_of", "to": "api.additional-browser-arguments", "note": "Direction of loss: the flags lost, eviction won." },
-
-    { "from": "d.teardown-over-suspend", "rel": "motivated_by", "to": "d.eviction-is-the-only-lever" },
-    { "from": "d.teardown-over-suspend", "rel": "depends_on",   "to": "api.capturepreview", "note": "Blocked ON by default until the 0004 screenshot placeholder exists." },
-    { "from": "p.lossy-restore",         "rel": "constrains",   "to": "d.teardown-over-suspend" },
-    { "from": "api.trysuspend",          "rel": "implements",   "to": "d.eviction-is-the-only-lever" },
-
-    { "from": "c.refindability",       "rel": "motivated_by", "to": "p.tab-hoarding",       "note": "The anxiety driving hoarding is fear of irrecoverable loss, not attachment to the page." },
-    { "from": "c.refindability",       "rel": "constrains",   "to": "cmp.evictionpolicy",   "note": "Planned. Scoring must eventually weight how hard a tab would be to recover, not only recency and habit." },
-    { "from": "c.refindability",       "rel": "constrains",   "to": "d.teardown-over-suspend", "note": "Teardown is safe for a homepage and unsafe for a half-filled form; the policy has to tell them apart." },
-
-    { "from": "cmp.evictionpolicy",    "rel": "implements",   "to": "d.eviction-is-the-only-lever" },
-    { "from": "cmp.evictionpolicy",    "rel": "implements",   "to": "c.tab-taxonomy" },
-    { "from": "cmp.evictionpolicy",    "rel": "depends_on",   "to": "cmp.browsertab" },
-    { "from": "cmp.tabmanager",        "rel": "depends_on",   "to": "cmp.evictionpolicy" },
-    { "from": "cmp.tabmanager",        "rel": "depends_on",   "to": "cmp.hearthoptions" },
-    { "from": "cmp.hearthoptions",     "rel": "implements",   "to": "c.hibernate-by-default" },
-
-    { "from": "cmp.hearthoptions",     "rel": "introduced_in", "to": "commit.0003" },
-    { "from": "cmp.evictionpolicy",    "rel": "introduced_in", "to": "commit.0003" },
-    { "from": "k.no-process-model-control",   "rel": "introduced_in", "to": "commit.0003" },
-    { "from": "d.eviction-is-the-only-lever", "rel": "introduced_in", "to": "commit.0003" },
-    { "from": "d.teardown-over-suspend",      "rel": "introduced_in", "to": "commit.0003" },
-
-    { "from": "cmp.snapshotstore", "rel": "implements",   "to": "api.capturepreview" },
-    { "from": "cmp.snapshotstore", "rel": "implements",   "to": "c.ram-for-disk-trade" },
-    { "from": "cmp.snapshotstore", "rel": "implements",   "to": "d.teardown-over-suspend", "note": "Teardown is gated on a snapshot existing; without one TabManager falls back to suspension." },
-    { "from": "cmp.snapshotstore", "rel": "measured_by",  "to": "m.restore-fidelity" },
-    { "from": "k.capture-requires-live", "rel": "constrains", "to": "cmp.snapshotstore", "note": "Violated by the first implementation, which captured after the tab was already collapsed." },
-    { "from": "cmp.tabmanager",    "rel": "depends_on",   "to": "cmp.snapshotstore" },
-    { "from": "cmp.snapshotstore", "rel": "introduced_in", "to": "commit.0004" },
-
-    { "from": "d.content-blocking-is-the-indirect-lever", "rel": "motivated_by", "to": "k.no-process-model-control" },
-    { "from": "d.content-blocking-is-the-indirect-lever", "rel": "supersedes",   "to": "api.additional-browser-arguments", "note": "The content filter achieved what every Chromium switch could not." },
-    { "from": "d.content-blocking-is-the-indirect-lever", "rel": "constrains",   "to": "k.site-isolation-multiplies-renderers", "note": "Fewer cross-origin frames means fewer site instances to isolate." },
-    { "from": "d.content-blocking-is-the-indirect-lever", "rel": "implements",   "to": "c.hibernate-by-default" },
-    { "from": "k.frame-blocking-breaks-pages", "rel": "constrains", "to": "d.content-blocking-is-the-indirect-lever", "note": "Why it is a mode and never a silent default." },
-    { "from": "cmp.tabmanager",    "rel": "implements",   "to": "d.content-blocking-is-the-indirect-lever" },
-
-    { "from": "cmp.memoryprobe",   "rel": "measured_by",  "to": "m.reclaim-delta" },
-    { "from": "cmp.memoryprobe",   "rel": "implements",   "to": "k.no-per-tab-memory-api", "note": "The process-tree workaround the constraint prescribes." },
-    { "from": "p.invisible-cost",  "rel": "constrains",   "to": "cmp.memoryprobe",         "note": "The readout exists to make the cost legible without nagging." },
-    { "from": "cmp.mainwindow",    "rel": "depends_on",   "to": "cmp.memoryprobe" },
-
-    { "from": "cmp.memoryprobe",   "rel": "introduced_in", "to": "commit.0005" },
-    { "from": "d.content-blocking-is-the-indirect-lever", "rel": "introduced_in", "to": "commit.0005" },
-    { "from": "k.frame-blocking-breaks-pages",            "rel": "introduced_in", "to": "commit.0005" },
-
-    { "from": "k.wpf-airspace",             "rel": "constrains",   "to": "d.dotnet-wpf",              "note": "A cost of the WPF host that WinUI 3 would not have imposed in the same way." },
-    { "from": "k.wpf-airspace",             "rel": "constrains",   "to": "d.bigpicture-is-budget-one" },
-    { "from": "k.capture-needs-first-paint","rel": "constrains",   "to": "cmp.snapshotstore" },
-    { "from": "k.capture-needs-first-paint","rel": "motivated_by", "to": "k.capture-requires-live" },
-    { "from": "d.bigpicture-is-budget-one", "rel": "implements",   "to": "c.hibernate-by-default" },
-    { "from": "d.bigpicture-is-budget-one", "rel": "depends_on",   "to": "cmp.snapshotstore",         "note": "The wall is built from the screenshots eviction already paid for." },
-    { "from": "d.bigpicture-is-budget-one", "rel": "motivated_by", "to": "p.archive-blackhole",       "note": "A visual wall is the answer to archives nobody revisits." },
-    { "from": "cmp.snapshotconverter",      "rel": "implements",   "to": "d.bigpicture-is-budget-one" },
-    { "from": "cmp.snapshotconverter",      "rel": "depends_on",   "to": "cmp.snapshotstore" },
-    { "from": "cmp.mainwindow",             "rel": "implements",   "to": "d.bigpicture-is-budget-one" },
-
-    { "from": "k.wpf-airspace",             "rel": "introduced_in", "to": "commit.0006" },
-    { "from": "k.capture-needs-first-paint","rel": "introduced_in", "to": "commit.0006" },
-    { "from": "d.bigpicture-is-budget-one", "rel": "introduced_in", "to": "commit.0006" },
-    { "from": "cmp.snapshotconverter",      "rel": "introduced_in", "to": "commit.0006" },
-
-    { "from": "cmp.thememanager",       "rel": "implements",   "to": "d.tokenised-theming" },
-    { "from": "cmp.mainwindow",         "rel": "depends_on",   "to": "cmp.thememanager" },
-    { "from": "cmp.maximisefix",        "rel": "implements",   "to": "k.custom-chrome-maximise" },
-    { "from": "cmp.mainwindow",         "rel": "depends_on",   "to": "cmp.maximisefix" },
-    { "from": "k.custom-chrome-maximise","rel": "constrains",  "to": "d.dotnet-wpf" },
-    { "from": "k.custom-chrome-maximise","rel": "constrains",  "to": "p.invisible-cost", "note": "The first build hid the memory readout behind the taskbar." },
-    { "from": "k.powershell-utf8-corruption", "rel": "constrains", "to": "cmp.mainwindow" },
-    { "from": "d.bigpicture-exit-hibernates", "rel": "implements",   "to": "c.hibernate-by-default" },
-    { "from": "d.bigpicture-exit-hibernates", "rel": "motivated_by", "to": "d.bigpicture-is-budget-one" },
-    { "from": "d.bigpicture-exit-hibernates", "rel": "depends_on",   "to": "cmp.evictionpolicy" },
-    { "from": "d.tokenised-theming",    "rel": "constrains",   "to": "cmp.snapshotconverter", "note": "Converters resolve brushes per call so a swap does not apply half-way." },
-
-    { "from": "d.tokenised-theming",          "rel": "introduced_in", "to": "commit.0007" },
-    { "from": "cmp.thememanager",             "rel": "introduced_in", "to": "commit.0007" },
-    { "from": "cmp.maximisefix",              "rel": "introduced_in", "to": "commit.0007" },
-    { "from": "k.custom-chrome-maximise",     "rel": "introduced_in", "to": "commit.0007" },
-    { "from": "k.powershell-utf8-corruption", "rel": "introduced_in", "to": "commit.0007" },
-    { "from": "d.bigpicture-exit-hibernates", "rel": "introduced_in", "to": "commit.0007" }
+    {
+      "from": "p.tab-hoarding",
+      "rel": "motivated_by",
+      "to": "p.archive-blackhole",
+      "note": "Users resist archiving precisely because archives are not trustworthy retrieval."
+    },
+    {
+      "from": "c.hibernate-by-default",
+      "rel": "motivated_by",
+      "to": "p.tab-hoarding"
+    },
+    {
+      "from": "c.hibernate-by-default",
+      "rel": "motivated_by",
+      "to": "c.process-overhead-dominates"
+    },
+    {
+      "from": "c.hibernate-by-default",
+      "rel": "depends_on",
+      "to": "c.ram-for-disk-trade"
+    },
+    {
+      "from": "c.hibernate-by-default",
+      "rel": "measured_by",
+      "to": "m.steady-state-ceiling"
+    },
+    {
+      "from": "c.hibernate-by-default",
+      "rel": "measured_by",
+      "to": "m.restore-fidelity"
+    },
+    {
+      "from": "p.lossy-restore",
+      "rel": "constrains",
+      "to": "c.hibernate-by-default",
+      "note": "Eviction is only acceptable if restore is indistinguishable from never having left."
+    },
+    {
+      "from": "k.capture-requires-live",
+      "rel": "constrains",
+      "to": "api.capturepreview"
+    },
+    {
+      "from": "d.webview2-shell",
+      "rel": "motivated_by",
+      "to": "c.hibernate-by-default"
+    },
+    {
+      "from": "d.webview2-shell",
+      "rel": "depends_on",
+      "to": "api.trysuspend"
+    },
+    {
+      "from": "d.webview2-shell",
+      "rel": "depends_on",
+      "to": "api.capturepreview"
+    },
+    {
+      "from": "d.webview2-shell",
+      "rel": "depends_on",
+      "to": "api.memory-target-level"
+    },
+    {
+      "from": "k.windows-only",
+      "rel": "constrains",
+      "to": "d.webview2-shell"
+    },
+    {
+      "from": "k.widevine-drm",
+      "rel": "constrains",
+      "to": "d.webview2-shell"
+    },
+    {
+      "from": "d.shared-environment",
+      "rel": "motivated_by",
+      "to": "c.process-overhead-dominates"
+    },
+    {
+      "from": "d.shared-environment",
+      "rel": "implements",
+      "to": "c.hibernate-by-default"
+    },
+    {
+      "from": "cmp.mainwindow",
+      "rel": "implements",
+      "to": "d.shared-environment"
+    },
+    {
+      "from": "cmp.mainwindow",
+      "rel": "depends_on",
+      "to": "cmp.app"
+    },
+    {
+      "from": "k.no-per-tab-memory-api",
+      "rel": "constrains",
+      "to": "m.reclaim-delta"
+    },
+    {
+      "from": "p.invisible-cost",
+      "rel": "measured_by",
+      "to": "m.reclaim-delta"
+    },
+    {
+      "from": "d.dotnet-wpf",
+      "rel": "implements",
+      "to": "d.webview2-shell"
+    },
+    {
+      "from": "cmp.app",
+      "rel": "introduced_in",
+      "to": "commit.0001"
+    },
+    {
+      "from": "cmp.mainwindow",
+      "rel": "introduced_in",
+      "to": "commit.0001"
+    },
+    {
+      "from": "cmp.tabmanager",
+      "rel": "implements",
+      "to": "d.shared-environment",
+      "note": "Supersedes MainWindow as the environment owner."
+    },
+    {
+      "from": "cmp.tabmanager",
+      "rel": "supersedes",
+      "to": "cmp.mainwindow",
+      "note": "For environment ownership only; MainWindow remains the shell."
+    },
+    {
+      "from": "cmp.tabmanager",
+      "rel": "depends_on",
+      "to": "cmp.browsertab"
+    },
+    {
+      "from": "cmp.browsertab",
+      "rel": "depends_on",
+      "to": "cmp.tabstate"
+    },
+    {
+      "from": "cmp.browsertab",
+      "rel": "implements",
+      "to": "c.hibernate-by-default",
+      "note": "Nullable View encodes 'a tab is a document, a renderer is a cache'."
+    },
+    {
+      "from": "cmp.tabstate",
+      "rel": "implements",
+      "to": "c.hibernate-by-default"
+    },
+    {
+      "from": "k.site-isolation-multiplies-renderers",
+      "rel": "constrains",
+      "to": "d.shared-environment",
+      "note": "A shared environment guarantees one BROWSER process, not one renderer per tab."
+    },
+    {
+      "from": "k.site-isolation-multiplies-renderers",
+      "rel": "constrains",
+      "to": "m.steady-state-ceiling"
+    },
+    {
+      "from": "k.site-isolation-multiplies-renderers",
+      "rel": "motivated_by",
+      "to": "c.process-overhead-dominates"
+    },
+    {
+      "from": "api.additional-browser-arguments",
+      "rel": "constrains",
+      "to": "k.site-isolation-multiplies-renderers",
+      "note": "--renderer-process-limit is the only embedder-side lever."
+    },
+    {
+      "from": "d.webview2-shell",
+      "rel": "depends_on",
+      "to": "api.additional-browser-arguments"
+    },
+    {
+      "from": "cmp.tabstate",
+      "rel": "introduced_in",
+      "to": "commit.0002"
+    },
+    {
+      "from": "cmp.browsertab",
+      "rel": "introduced_in",
+      "to": "commit.0002"
+    },
+    {
+      "from": "cmp.tabmanager",
+      "rel": "introduced_in",
+      "to": "commit.0002"
+    },
+    {
+      "from": "k.site-isolation-multiplies-renderers",
+      "rel": "introduced_in",
+      "to": "commit.0002"
+    },
+    {
+      "from": "k.no-process-model-control",
+      "rel": "supersedes",
+      "to": "api.additional-browser-arguments",
+      "note": "The API exists and is plumbed correctly; Chromium ignores what it carries."
+    },
+    {
+      "from": "k.no-process-model-control",
+      "rel": "constrains",
+      "to": "d.webview2-shell",
+      "note": "Strongest argument yet that WebView2 is a staging post, not the destination."
+    },
+    {
+      "from": "k.no-process-model-control",
+      "rel": "motivated_by",
+      "to": "k.site-isolation-multiplies-renderers"
+    },
+    {
+      "from": "d.eviction-is-the-only-lever",
+      "rel": "motivated_by",
+      "to": "k.no-process-model-control"
+    },
+    {
+      "from": "d.eviction-is-the-only-lever",
+      "rel": "implements",
+      "to": "c.hibernate-by-default"
+    },
+    {
+      "from": "d.eviction-is-the-only-lever",
+      "rel": "rejected_in_favour_of",
+      "to": "api.additional-browser-arguments",
+      "note": "Direction of loss: the flags lost, eviction won."
+    },
+    {
+      "from": "d.teardown-over-suspend",
+      "rel": "motivated_by",
+      "to": "d.eviction-is-the-only-lever"
+    },
+    {
+      "from": "d.teardown-over-suspend",
+      "rel": "depends_on",
+      "to": "api.capturepreview",
+      "note": "Blocked ON by default until the 0004 screenshot placeholder exists."
+    },
+    {
+      "from": "p.lossy-restore",
+      "rel": "constrains",
+      "to": "d.teardown-over-suspend"
+    },
+    {
+      "from": "api.trysuspend",
+      "rel": "implements",
+      "to": "d.eviction-is-the-only-lever"
+    },
+    {
+      "from": "c.refindability",
+      "rel": "motivated_by",
+      "to": "p.tab-hoarding",
+      "note": "The anxiety driving hoarding is fear of irrecoverable loss, not attachment to the page."
+    },
+    {
+      "from": "c.refindability",
+      "rel": "constrains",
+      "to": "cmp.evictionpolicy",
+      "note": "Planned. Scoring must eventually weight how hard a tab would be to recover, not only recency and habit."
+    },
+    {
+      "from": "c.refindability",
+      "rel": "constrains",
+      "to": "d.teardown-over-suspend",
+      "note": "Teardown is safe for a homepage and unsafe for a half-filled form; the policy has to tell them apart."
+    },
+    {
+      "from": "cmp.evictionpolicy",
+      "rel": "implements",
+      "to": "d.eviction-is-the-only-lever"
+    },
+    {
+      "from": "cmp.evictionpolicy",
+      "rel": "implements",
+      "to": "c.tab-taxonomy"
+    },
+    {
+      "from": "cmp.evictionpolicy",
+      "rel": "depends_on",
+      "to": "cmp.browsertab"
+    },
+    {
+      "from": "cmp.tabmanager",
+      "rel": "depends_on",
+      "to": "cmp.evictionpolicy"
+    },
+    {
+      "from": "cmp.tabmanager",
+      "rel": "depends_on",
+      "to": "cmp.hearthoptions"
+    },
+    {
+      "from": "cmp.hearthoptions",
+      "rel": "implements",
+      "to": "c.hibernate-by-default"
+    },
+    {
+      "from": "cmp.hearthoptions",
+      "rel": "introduced_in",
+      "to": "commit.0003"
+    },
+    {
+      "from": "cmp.evictionpolicy",
+      "rel": "introduced_in",
+      "to": "commit.0003"
+    },
+    {
+      "from": "k.no-process-model-control",
+      "rel": "introduced_in",
+      "to": "commit.0003"
+    },
+    {
+      "from": "d.eviction-is-the-only-lever",
+      "rel": "introduced_in",
+      "to": "commit.0003"
+    },
+    {
+      "from": "d.teardown-over-suspend",
+      "rel": "introduced_in",
+      "to": "commit.0003"
+    },
+    {
+      "from": "cmp.snapshotstore",
+      "rel": "implements",
+      "to": "api.capturepreview"
+    },
+    {
+      "from": "cmp.snapshotstore",
+      "rel": "implements",
+      "to": "c.ram-for-disk-trade"
+    },
+    {
+      "from": "cmp.snapshotstore",
+      "rel": "implements",
+      "to": "d.teardown-over-suspend",
+      "note": "Teardown is gated on a snapshot existing; without one TabManager falls back to suspension."
+    },
+    {
+      "from": "cmp.snapshotstore",
+      "rel": "measured_by",
+      "to": "m.restore-fidelity"
+    },
+    {
+      "from": "k.capture-requires-live",
+      "rel": "constrains",
+      "to": "cmp.snapshotstore",
+      "note": "Violated by the first implementation, which captured after the tab was already collapsed."
+    },
+    {
+      "from": "cmp.tabmanager",
+      "rel": "depends_on",
+      "to": "cmp.snapshotstore"
+    },
+    {
+      "from": "cmp.snapshotstore",
+      "rel": "introduced_in",
+      "to": "commit.0004"
+    },
+    {
+      "from": "d.content-blocking-is-the-indirect-lever",
+      "rel": "motivated_by",
+      "to": "k.no-process-model-control"
+    },
+    {
+      "from": "d.content-blocking-is-the-indirect-lever",
+      "rel": "supersedes",
+      "to": "api.additional-browser-arguments",
+      "note": "The content filter achieved what every Chromium switch could not."
+    },
+    {
+      "from": "d.content-blocking-is-the-indirect-lever",
+      "rel": "constrains",
+      "to": "k.site-isolation-multiplies-renderers",
+      "note": "Fewer cross-origin frames means fewer site instances to isolate."
+    },
+    {
+      "from": "d.content-blocking-is-the-indirect-lever",
+      "rel": "implements",
+      "to": "c.hibernate-by-default"
+    },
+    {
+      "from": "k.frame-blocking-breaks-pages",
+      "rel": "constrains",
+      "to": "d.content-blocking-is-the-indirect-lever",
+      "note": "Why it is a mode and never a silent default."
+    },
+    {
+      "from": "cmp.tabmanager",
+      "rel": "implements",
+      "to": "d.content-blocking-is-the-indirect-lever"
+    },
+    {
+      "from": "cmp.memoryprobe",
+      "rel": "measured_by",
+      "to": "m.reclaim-delta"
+    },
+    {
+      "from": "cmp.memoryprobe",
+      "rel": "implements",
+      "to": "k.no-per-tab-memory-api",
+      "note": "The process-tree workaround the constraint prescribes."
+    },
+    {
+      "from": "p.invisible-cost",
+      "rel": "constrains",
+      "to": "cmp.memoryprobe",
+      "note": "The readout exists to make the cost legible without nagging."
+    },
+    {
+      "from": "cmp.mainwindow",
+      "rel": "depends_on",
+      "to": "cmp.memoryprobe"
+    },
+    {
+      "from": "cmp.memoryprobe",
+      "rel": "introduced_in",
+      "to": "commit.0005"
+    },
+    {
+      "from": "d.content-blocking-is-the-indirect-lever",
+      "rel": "introduced_in",
+      "to": "commit.0005"
+    },
+    {
+      "from": "k.frame-blocking-breaks-pages",
+      "rel": "introduced_in",
+      "to": "commit.0005"
+    },
+    {
+      "from": "k.wpf-airspace",
+      "rel": "constrains",
+      "to": "d.dotnet-wpf",
+      "note": "A cost of the WPF host that WinUI 3 would not have imposed in the same way."
+    },
+    {
+      "from": "k.wpf-airspace",
+      "rel": "constrains",
+      "to": "d.bigpicture-is-budget-one"
+    },
+    {
+      "from": "k.capture-needs-first-paint",
+      "rel": "constrains",
+      "to": "cmp.snapshotstore"
+    },
+    {
+      "from": "k.capture-needs-first-paint",
+      "rel": "motivated_by",
+      "to": "k.capture-requires-live"
+    },
+    {
+      "from": "d.bigpicture-is-budget-one",
+      "rel": "implements",
+      "to": "c.hibernate-by-default"
+    },
+    {
+      "from": "d.bigpicture-is-budget-one",
+      "rel": "depends_on",
+      "to": "cmp.snapshotstore",
+      "note": "The wall is built from the screenshots eviction already paid for."
+    },
+    {
+      "from": "d.bigpicture-is-budget-one",
+      "rel": "motivated_by",
+      "to": "p.archive-blackhole",
+      "note": "A visual wall is the answer to archives nobody revisits."
+    },
+    {
+      "from": "cmp.snapshotconverter",
+      "rel": "implements",
+      "to": "d.bigpicture-is-budget-one"
+    },
+    {
+      "from": "cmp.snapshotconverter",
+      "rel": "depends_on",
+      "to": "cmp.snapshotstore"
+    },
+    {
+      "from": "cmp.mainwindow",
+      "rel": "implements",
+      "to": "d.bigpicture-is-budget-one"
+    },
+    {
+      "from": "k.wpf-airspace",
+      "rel": "introduced_in",
+      "to": "commit.0006"
+    },
+    {
+      "from": "k.capture-needs-first-paint",
+      "rel": "introduced_in",
+      "to": "commit.0006"
+    },
+    {
+      "from": "d.bigpicture-is-budget-one",
+      "rel": "introduced_in",
+      "to": "commit.0006"
+    },
+    {
+      "from": "cmp.snapshotconverter",
+      "rel": "introduced_in",
+      "to": "commit.0006"
+    },
+    {
+      "from": "cmp.thememanager",
+      "rel": "implements",
+      "to": "d.tokenised-theming"
+    },
+    {
+      "from": "cmp.mainwindow",
+      "rel": "depends_on",
+      "to": "cmp.thememanager"
+    },
+    {
+      "from": "cmp.maximisefix",
+      "rel": "implements",
+      "to": "k.custom-chrome-maximise"
+    },
+    {
+      "from": "cmp.mainwindow",
+      "rel": "depends_on",
+      "to": "cmp.maximisefix"
+    },
+    {
+      "from": "k.custom-chrome-maximise",
+      "rel": "constrains",
+      "to": "d.dotnet-wpf"
+    },
+    {
+      "from": "k.custom-chrome-maximise",
+      "rel": "constrains",
+      "to": "p.invisible-cost",
+      "note": "The first build hid the memory readout behind the taskbar."
+    },
+    {
+      "from": "k.powershell-utf8-corruption",
+      "rel": "constrains",
+      "to": "cmp.mainwindow"
+    },
+    {
+      "from": "d.bigpicture-exit-hibernates",
+      "rel": "implements",
+      "to": "c.hibernate-by-default"
+    },
+    {
+      "from": "d.bigpicture-exit-hibernates",
+      "rel": "motivated_by",
+      "to": "d.bigpicture-is-budget-one"
+    },
+    {
+      "from": "d.bigpicture-exit-hibernates",
+      "rel": "depends_on",
+      "to": "cmp.evictionpolicy"
+    },
+    {
+      "from": "d.tokenised-theming",
+      "rel": "constrains",
+      "to": "cmp.snapshotconverter",
+      "note": "Converters resolve brushes per call so a swap does not apply half-way."
+    },
+    {
+      "from": "d.tokenised-theming",
+      "rel": "introduced_in",
+      "to": "commit.0007"
+    },
+    {
+      "from": "cmp.thememanager",
+      "rel": "introduced_in",
+      "to": "commit.0007"
+    },
+    {
+      "from": "cmp.maximisefix",
+      "rel": "introduced_in",
+      "to": "commit.0007"
+    },
+    {
+      "from": "k.custom-chrome-maximise",
+      "rel": "introduced_in",
+      "to": "commit.0007"
+    },
+    {
+      "from": "k.powershell-utf8-corruption",
+      "rel": "introduced_in",
+      "to": "commit.0007"
+    },
+    {
+      "from": "d.bigpicture-exit-hibernates",
+      "rel": "introduced_in",
+      "to": "commit.0007"
+    },
+    {
+      "from": "k.two-keyboard-paths",
+      "rel": "constrains",
+      "to": "cmp.shortcutrouter",
+      "note": "The reason the class exists and the reason it has two entry points."
+    },
+    {
+      "from": "k.wpf-wrapper-hides-controller",
+      "rel": "constrains",
+      "to": "cmp.shortcutrouter",
+      "note": "Forces reflection to reach AcceleratorKeyPressed; kept fail-soft."
+    },
+    {
+      "from": "k.double-dispatch-on-page-keys",
+      "rel": "constrains",
+      "to": "cmp.shortcutrouter",
+      "note": "The chrome path declines keys whose OriginalSource is a WebView2."
+    },
+    {
+      "from": "k.two-keyboard-paths",
+      "rel": "depends_on",
+      "to": "d.webview2-shell",
+      "note": "Out-of-process input delivery is a consequence of embedding WebView2 at all."
+    },
+    {
+      "from": "k.wpf-wrapper-hides-controller",
+      "rel": "depends_on",
+      "to": "d.dotnet-wpf",
+      "note": "The WinForms wrapper exposes the controller; the WPF one does not."
+    },
+    {
+      "from": "cmp.shortcutrouter",
+      "rel": "depends_on",
+      "to": "cmp.tabmanager",
+      "note": "Hooks each newly realised WebView2 via TabManager.Realised."
+    },
+    {
+      "from": "cmp.shortcutrouter",
+      "rel": "implements",
+      "to": "commit.0008"
+    },
+    {
+      "from": "cmp.siterules",
+      "rel": "implements",
+      "to": "commit.0008"
+    },
+    {
+      "from": "cmp.diag",
+      "rel": "implements",
+      "to": "commit.0008"
+    },
+    {
+      "from": "k.two-keyboard-paths",
+      "rel": "introduced_in",
+      "to": "commit.0008"
+    },
+    {
+      "from": "k.wpf-wrapper-hides-controller",
+      "rel": "introduced_in",
+      "to": "commit.0008"
+    },
+    {
+      "from": "k.double-dispatch-on-page-keys",
+      "rel": "introduced_in",
+      "to": "commit.0008"
+    },
+    {
+      "from": "k.source-is-stale-during-navigation",
+      "rel": "introduced_in",
+      "to": "commit.0008"
+    },
+    {
+      "from": "d.lean-is-the-default",
+      "rel": "introduced_in",
+      "to": "commit.0008"
+    },
+    {
+      "from": "d.filtering-needs-an-escape-hatch",
+      "rel": "introduced_in",
+      "to": "commit.0008"
+    },
+    {
+      "from": "d.engine-labels-over-inference",
+      "rel": "introduced_in",
+      "to": "commit.0008"
+    },
+    {
+      "from": "m.filtering-reclaim",
+      "rel": "introduced_in",
+      "to": "commit.0008"
+    },
+    {
+      "from": "d.lean-is-the-default",
+      "rel": "implements",
+      "to": "c.hibernate-by-default",
+      "note": "A thesis that has to be switched on is offered, not held."
+    },
+    {
+      "from": "d.lean-is-the-default",
+      "rel": "depends_on",
+      "to": "d.filtering-needs-an-escape-hatch",
+      "note": "Filtering could only become the default once breakage had a one-click remedy."
+    },
+    {
+      "from": "d.lean-is-the-default",
+      "rel": "supersedes",
+      "to": "d.content-blocking-is-the-indirect-lever",
+      "note": "Keeps the mechanism, drops the mode: filtering is no longer something the user opts into."
+    },
+    {
+      "from": "d.filtering-needs-an-escape-hatch",
+      "rel": "motivated_by",
+      "to": "k.frame-blocking-breaks-pages",
+      "note": "Answers the objection that made 0005 keep this behind a toggle; 0005 recorded the allowlist as the way out."
+    },
+    {
+      "from": "cmp.siterules",
+      "rel": "implements",
+      "to": "d.filtering-needs-an-escape-hatch"
+    },
+    {
+      "from": "d.engine-labels-over-inference",
+      "rel": "motivated_by",
+      "to": "k.source-is-stale-during-navigation",
+      "note": "Stop needing Source to be current and the ordering bug cannot recur."
+    },
+    {
+      "from": "k.source-is-stale-during-navigation",
+      "rel": "constrains",
+      "to": "cmp.tabmanager",
+      "note": "The request filter reads tab.Url, kept current by NavigationStarting, not core.Source."
+    },
+    {
+      "from": "d.engine-labels-over-inference",
+      "rel": "implements",
+      "to": "d.content-blocking-is-the-indirect-lever",
+      "note": "Same lever, classified by the engine rather than by string comparison."
+    },
+    {
+      "from": "m.filtering-reclaim",
+      "rel": "measured_by",
+      "to": "cmp.memoryprobe"
+    },
+    {
+      "from": "d.lean-is-the-default",
+      "rel": "measured_by",
+      "to": "m.filtering-reclaim"
+    },
+    {
+      "from": "cmp.diag",
+      "rel": "measured_by",
+      "to": "m.restore-fidelity",
+      "note": "The tracing instrument that makes behavioural claims checkable rather than asserted."
+    },
+    {
+      "from": "cmp.mainwindow",
+      "rel": "depends_on",
+      "to": "cmp.shortcutrouter",
+      "note": "Owns the command dispatcher both key paths call into."
+    }
   ]
 }
-
-
-

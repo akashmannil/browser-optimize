@@ -166,75 +166,39 @@
                 </Setter>
             </Style>
 
-            <!-- ── Pill toggle ─────────────────────────────────────────────
-                 Animates its fill so engaging a mode is a transition rather
-                 than a flicker — it must be unmistakable that low power is on,
-                 because it silently changes how pages load. -->
-            <Style x:Key="PillToggle" TargetType="ToggleButton">
-                <Setter Property="Background" Value="Transparent" />
+            <!-- ── Shield pill ─────────────────────────────────────────────
+                 Sits inside the address field and appears only once the content
+                 filter has refused something on the current page. It fades in
+                 rather than popping, because it arrives mid-page-load and a
+                 sudden badge next to the URL reads as an error.
+
+                 Deliberately NOT accent-coloured: this is information, not a
+                 warning. The accent is reserved for things the user chose. -->
+            <Style x:Key="ShieldPill" TargetType="Button">
                 <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
+                <Setter Property="Background" Value="{DynamicResource Hover}" />
                 <Setter Property="BorderThickness" Value="0" />
                 <Setter Property="FontFamily" Value="{StaticResource Body}" />
-                <Setter Property="FontSize" Value="{StaticResource TextSM}" />
-                <Setter Property="Padding" Value="13,6" />
+                <Setter Property="FontSize" Value="{StaticResource TextXS}" />
+                <Setter Property="Padding" Value="9,3" />
                 <Setter Property="Cursor" Value="Hand" />
                 <Setter Property="WindowChrome.IsHitTestVisibleInChrome" Value="True" />
                 <Setter Property="Template">
                     <Setter.Value>
-                        <ControlTemplate TargetType="ToggleButton">
-                            <Grid>
-                                <Border x:Name="Fill"
-                                        Background="{DynamicResource Accent}"
-                                        CornerRadius="999" Opacity="0" />
-                                <Border x:Name="Ghost"
-                                        Background="{DynamicResource Hover}"
-                                        CornerRadius="999" Opacity="0" />
-                                <ContentPresenter Margin="{TemplateBinding Padding}"
-                                                  HorizontalAlignment="Center"
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="B"
+                                    Background="{TemplateBinding Background}"
+                                    CornerRadius="999"
+                                    Padding="{TemplateBinding Padding}">
+                                <ContentPresenter HorizontalAlignment="Center"
                                                   VerticalAlignment="Center" />
-                            </Grid>
+                            </Border>
                             <ControlTemplate.Triggers>
                                 <Trigger Property="IsMouseOver" Value="True">
-                                    <Trigger.EnterActions>
-                                        <BeginStoryboard>
-                                            <Storyboard>
-                                                <DoubleAnimation Storyboard.TargetName="Ghost"
-                                                                 Storyboard.TargetProperty="Opacity"
-                                                                 To="1" Duration="{StaticResource Fast}" />
-                                            </Storyboard>
-                                        </BeginStoryboard>
-                                    </Trigger.EnterActions>
-                                    <Trigger.ExitActions>
-                                        <BeginStoryboard>
-                                            <Storyboard>
-                                                <DoubleAnimation Storyboard.TargetName="Ghost"
-                                                                 Storyboard.TargetProperty="Opacity"
-                                                                 To="0" Duration="{StaticResource Fast}" />
-                                            </Storyboard>
-                                        </BeginStoryboard>
-                                    </Trigger.ExitActions>
-                                </Trigger>
-                                <Trigger Property="IsChecked" Value="True">
-                                    <Trigger.EnterActions>
-                                        <BeginStoryboard>
-                                            <Storyboard>
-                                                <DoubleAnimation Storyboard.TargetName="Fill"
-                                                                 Storyboard.TargetProperty="Opacity"
-                                                                 To="1" Duration="{StaticResource Medium}"
-                                                                 EasingFunction="{StaticResource EaseOut}" />
-                                            </Storyboard>
-                                        </BeginStoryboard>
-                                    </Trigger.EnterActions>
-                                    <Trigger.ExitActions>
-                                        <BeginStoryboard>
-                                            <Storyboard>
-                                                <DoubleAnimation Storyboard.TargetName="Fill"
-                                                                 Storyboard.TargetProperty="Opacity"
-                                                                 To="0" Duration="{StaticResource Medium}" />
-                                            </Storyboard>
-                                        </BeginStoryboard>
-                                    </Trigger.ExitActions>
-                                    <Setter Property="Foreground" Value="{DynamicResource OnAccent}" />
+                                    <Setter TargetName="B" Property="Background"
+                                            Value="{DynamicResource Accent}" />
+                                    <Setter Property="Foreground"
+                                            Value="{DynamicResource OnAccent}" />
                                 </Trigger>
                             </ControlTemplate.Triggers>
                         </ControlTemplate>

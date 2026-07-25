@@ -19,6 +19,7 @@ public sealed class BrowserTab : INotifyPropertyChanged
     private TabState _state = TabState.Cold;
     private WebView2? _view;
     private string? _snapshotPath;
+    private int _blockedCount;
 
     public BrowserTab(string url)
     {
@@ -54,6 +55,22 @@ public sealed class BrowserTab : INotifyPropertyChanged
     /// tab has not painted again yet.
     /// </summary>
     public bool HasRendered { get; internal set; }
+
+    /// <summary>
+    /// How many cross-origin subframe and media requests the content filter has
+    /// refused on this page's current navigation.
+    ///
+    /// This is the number the shield in the toolbar is bound to, and it is the
+    /// whole reason filtering can be a default (see <see cref="SiteRules"/>):
+    /// the filter announces what it did rather than leaving the user to work out
+    /// why a login button does nothing. Reset on every navigation, because a
+    /// count carried over from the previous page describes nothing.
+    /// </summary>
+    public int BlockedCount
+    {
+        get => _blockedCount;
+        internal set => Set(ref _blockedCount, value);
+    }
 
     public string Url
     {

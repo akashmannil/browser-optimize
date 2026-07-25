@@ -39,18 +39,34 @@ Early. Built commit by commit, each with a design note in [`docs/commits/`](docs
 | [`0005`](docs/commits/0005-taskbar-low-power.md) | Taskbar, measured memory readout, low-power mode |
 | [`0006`](docs/commits/0006-big-picture.md) | Big Picture — full-screen tab wall, live budget pinned to 1 |
 | [`0007`](docs/commits/0007-ui-overhaul.md) | UI overhaul — custom chrome, light/dark theming, motion |
+| [`0008`](docs/commits/0008-keyboard-and-lean-default.md) | Keyboard shortcuts that actually fire; lean by default + per-site shield |
 
-### Modes
+### Lean is the default
 
-**Low power** — tightens the budget and refuses cross-origin subframes and media. Cuts a
-stackoverflow.com tab from 14 renderers to 1. Breaks embedded video, OAuth logins and payment
-frames, which is why it is an explicit toggle and never a silent default.
+There is no low-power toggle. The live budget is **3** and cross-origin subframes and media are
+refused from startup — what used to be a mode is simply what the browser is (`d.lean-is-the-default`).
 
-**Big Picture** (`F11`) — a full-screen, keyboard-driven wall of every tab, built from the
-screenshots hibernation already produces. Entering it pins the live budget to **1**: you are
-looking at pictures, so exactly one page needs to be real. The lean-back interface and the memory
-architecture happen to want the same thing, which is the reason the mode exists rather than being
-a skin. Leaving it puts every other tab straight to sleep, rather than waiting for pressure.
+That is only defensible because breakage has a remedy in the same place as its explanation. Each
+tab counts what was refused; a shield appears in the address bar **only when something actually
+was**; one click exempts the host permanently and reloads. Granting a site is visibly expensive,
+which is the point — on `stackoverflow.com` it goes from 1 renderer / 719 MB to 14 renderers /
+1.6 GB, and the status bar says so.
+
+### Keyboard
+
+Chrome's bindings, because these live in muscle memory: `Ctrl+T`/`W`/`Shift+T`, `Ctrl+L`, `Ctrl+R`,
+`Ctrl+Shift+R`, `Alt+←`/`→`, `Ctrl+Tab`, `Ctrl+1`–`8`, `Ctrl+9`, `Ctrl+±`/`0`, `F5`, `F6`.
+
+Getting these to work at all needed two separate delivery paths. WebView2 is out-of-process, so
+while a page has focus its key messages are queued to *the browser process's* thread and
+`Window.PreviewKeyDown` never fires (`k.two-keyboard-paths`). Page keys arrive only through
+`CoreWebView2Controller.AcceleratorKeyPressed`, which the WPF wrapper does not expose.
+
+**Big Picture** (`F9` / `Ctrl+Shift+A`) — a full-screen, keyboard-driven wall of every tab, built
+from the screenshots hibernation already produces. Entering it pins the live budget to **1**: you
+are looking at pictures, so exactly one page needs to be real. The lean-back interface and the
+memory architecture happen to want the same thing, which is the reason the mode exists rather than
+being a skin. Leaving it puts every other tab straight to sleep, rather than waiting for pressure.
 
 ## Interface
 
@@ -63,23 +79,25 @@ mode because ember on white fails contrast.
 HEARTH_THEME=light   # or dark, or unset to follow Windows
 ```
 
-### Low-power mode (commit `0005`)
+### Content filtering (commits `0005`, `0008`)
 
 One tab on stackoverflow.com:
 
 | Configuration | Renderers | Memory |
 | --- | ---: | ---: |
 | normal | 14 | 1356 MB |
-| low power | **1** | **301 MB** (−78%) |
-| low power, blocking disabled *(control)* | 14 | 1243 MB |
+| filtering on | **1** | **301 MB** (−78%) |
+| filtering on, blocking disabled *(control)* | 14 | 1243 MB |
 
 Commit `0003` found that no Chromium process-model switch has any effect through WebView2. But
 renderer count is a function of page *content*, and content an embedder controls completely — so
-low-power mode refuses cross-origin subframes and media at the request filter. The control run
-isolates the win to frame blocking rather than the tighter budget.
+the request filter refuses cross-origin subframes and media. The control run isolates the win to
+frame blocking rather than the tighter budget.
 
 It breaks things, deliberately and visibly: embedded video, OAuth logins, payment frames and
-CAPTCHAs all stop working. That is why it is a mode with a toggle, never a silent default.
+CAPTCHAs all stop working. Through `0007` that was why it stayed behind a toggle. Since `0008` it
+is the default, because the shield gives it a one-click, per-host way out — and `0008` re-measured
+the same 14→1 renderer result under a narrower cross-site-only rule.
 
 ### Measured (commit `0004`)
 

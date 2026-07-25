@@ -22,8 +22,10 @@ public partial class MainWindow : Window
     // that needs real typography is set in XAML, which is read as UTF-8.
     private const string Dot = "·";   // middle dot
     private const string Dash = "—";  // em dash
+    private const string Shield = "🛡"; // shield, for the blocked-content pill
 
     private TabManager? _tabs;
+    private ShortcutRouter? _router;
     private DispatcherTimer? _memoryTimer;
     private long _peakBytes;
     private WindowState _stateBeforeBigPicture = WindowState.Normal;
@@ -64,14 +66,19 @@ public partial class MainWindow : Window
             HidePlaceholder();
         });
 
+        // Every new renderer gets the keyboard hook. Attaching here rather than
+        // once at startup is not an optimisation -- a tab torn down by the
+        // budget and later rebuilt gets a brand-new control, and a hook attached
+        // only to the original would leave shortcuts dead on exactly the tabs
+        // that hibernation touched (k.two-keyboard-paths).
+        _router = new ShortcutRouter(Execute);
+        _tabs.Realised += (_, tab) =>
+        {
+            if (tab.View is { } view) _router.Attach(view);
+        };
+
         TabStrip.ItemsSource = _tabs.Tabs;
         TabWall.ItemsSource = _tabs.Tabs;
-
-        if (_tabs.Options.StartInLowPower)
-        {
-            await _tabs.SetLowPowerAsync(true);
-            LowPowerToggle.IsChecked = true;
-        }
 
         var startup = Environment.GetCommandLineArgs().Skip(1).ToArray();
         if (startup.Length == 0)
@@ -104,7 +111,185 @@ public partial class MainWindow : Window
 
         var version = await _tabs.GetRuntimeVersionAsync();
         Title = $"Hearth {Dash} WebView2 {version}";
+
+        // The keyboard hook is the one thing here that reaches into the SDK's
+        // internals, so a failure is reported rather than left to be discovered
+        // as "shortcuts sometimes do nothing".
+        if (_router.NativeHookError is { } hookError)
+            Debug.WriteLine($"[hearth] page-level shortcuts unavailable: {hookError}");
+
         Sync();
+    }
+
+    // ------------------------------------------------------------------------
+    // Commands
+    //
+    // Every keyboard-reachable action lands here, from both the chrome path and
+    // the page path. Returning false declines the key and lets it through to
+    // the page, which is what keeps Escape and the zoom keys well-behaved.
+    // ------------------------------------------------------------------------
+
+    private bool Execute(BrowserCommand command, int index)
+    {
+        if (_tabs is null) return false;
+
+        switch (command)
+        {
+            case BrowserCommand.NewTab:
+                NewTab();
+                return true;
+
+            case BrowserCommand.CloseTab:
+                if (_tabs.Active is { } closing) _tabs.Close(closing);
+                return true;
+
+            case BrowserCommand.ReopenClosedTab:
+                return _tabs.ReopenLastClosed() is not null;
+
+            case BrowserCommand.FocusAddress:
+                FocusAddress();
+                return true;
+
+            case BrowserCommand.Reload:
+                _tabs.Active?.View?.CoreWebView2?.Reload();
+                return true;
+
+            case BrowserCommand.HardReload:
+                HardReload();
+                return true;
+
+            case BrowserCommand.Back:
+                Back_Click(this, new RoutedEventArgs());
+                return true;
+
+            case BrowserCommand.Forward:
+                Forward_Click(this, new RoutedEventArgs());
+                return true;
+
+            case BrowserCommand.Home:
+                Home_Click(this, new RoutedEventArgs());
+                return true;
+
+            case BrowserCommand.NextTab:
+                return StepTab(+1);
+
+            case BrowserCommand.PreviousTab:
+                return StepTab(-1);
+
+            case BrowserCommand.SelectTab:
+                return SelectTab(_tabs.Tabs.ElementAtOrDefault(index));
+
+            case BrowserCommand.SelectLastTab:
+                return SelectTab(_tabs.Tabs.LastOrDefault());
+
+            case BrowserCommand.ZoomIn:
+                return Zoom(+1);
+
+            case BrowserCommand.ZoomOut:
+                return Zoom(-1);
+
+            case BrowserCommand.ZoomReset:
+                return Zoom(0);
+
+            case BrowserCommand.ToggleGrid:
+                _ = SetBigPictureAsync(BigPicture.Visibility != Visibility.Visible);
+                return true;
+
+            // Escape is the page's key. Only claim it when a Hearth surface is
+            // actually up to receive it; otherwise the page loses its ability to
+            // stop a load or dismiss its own dialogs.
+            case BrowserCommand.Dismiss:
+                if (BigPicture.Visibility != Visibility.Visible) return false;
+                _ = SetBigPictureAsync(false);
+                return true;
+
+            default:
+                return false;
+        }
+    }
+
+    private bool StepTab(int delta)
+    {
+        if (_tabs is null || _tabs.Tabs.Count < 2) return false;
+
+        var current = _tabs.Active is { } active ? _tabs.Tabs.IndexOf(active) : 0;
+        var count = _tabs.Tabs.Count;
+
+        // Wrap rather than clamp: Ctrl+Tab off the end of the strip returning to
+        // the first tab is what every browser does, and stopping dead reads as
+        // the shortcut having failed.
+        var next = ((current + delta) % count + count) % count;
+        return SelectTab(_tabs.Tabs[next]);
+    }
+
+    private bool SelectTab(BrowserTab? tab)
+    {
+        if (_tabs is null || tab is null) return false;
+        if (ReferenceEquals(tab, _tabs.Active)) return true;
+
+        _ = _tabs.ActivateAsync(tab);
+        return true;
+    }
+
+    /// <summary>
+    /// Chrome's zoom ladder. Steps rather than a multiplier, because repeated
+    /// multiplication lands on values like 1.7280000000000002 and the readout
+    /// has to apologise for them.
+    /// </summary>
+    private static readonly double[] ZoomLadder =
+        [0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0];
+
+    private bool Zoom(int direction)
+    {
+        if (_tabs?.Active?.View is not { } view) return false;
+
+        if (direction == 0)
+        {
+            view.ZoomFactor = 1.0;
+            Sync();
+            return true;
+        }
+
+        var current = view.ZoomFactor;
+        var nearest = Array.FindIndex(ZoomLadder, z => z >= current - 0.001);
+        if (nearest < 0) nearest = ZoomLadder.Length - 1;
+
+        var target = Math.Clamp(nearest + direction, 0, ZoomLadder.Length - 1);
+        view.ZoomFactor = ZoomLadder[target];
+        Sync();
+        return true;
+    }
+
+    /// <summary>
+    /// Reload ignoring cache. CoreWebView2.Reload() honours the cache, so the
+    /// shortcut users press specifically to defeat a stale asset would not.
+    /// </summary>
+    private void HardReload()
+    {
+        if (_tabs?.Active?.View?.CoreWebView2 is not { } core) return;
+
+        try
+        {
+            _ = core.CallDevToolsProtocolMethodAsync(
+                "Page.reload", "{\"ignoreCache\":true}");
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[hearth] hard reload failed, falling back: {ex.Message}");
+            core.Reload();
+        }
+    }
+
+    private void FocusAddress()
+    {
+        AddressBar.Focus();
+        AddressBar.SelectAll();
+    }
+
+    private void NewTab()
+    {
+        _tabs?.Open(HomeUrl);
+        FocusAddress();
     }
 
     // Window chrome ----------------------------------------------------------
@@ -122,7 +307,7 @@ public partial class MainWindow : Window
     private void UpdateMaximiseGlyph() =>
         // E923 restore-down, E922 maximise: the same glyphs Windows uses, so the
         // control keeps meaning what people expect it to mean.
-        MaxButton.Content = WindowState == WindowState.Maximized ? "" : "";
+        MaxButton.Content = WindowState == WindowState.Maximized ? "" : "";
 
     private void Theme_Click(object sender, RoutedEventArgs e)
     {
@@ -149,13 +334,42 @@ public partial class MainWindow : Window
         ForwardButton.IsEnabled = core?.CanGoForward ?? false;
         ReloadButton.IsEnabled = core is not null;
 
+        SyncShield(active);
+
         // "Awake" and "resting", not "live" and "hibernated". Resting carries
         // the promise that matters: it will be there when you come back.
         var resting = _tabs.Tabs.Count - _tabs.LiveCount;
-        TabsText.Text = resting > 0
+        var zoom = active?.View?.ZoomFactor ?? 1.0;
+
+        TabsText.Text = (resting > 0
             ? $"{_tabs.LiveCount} awake {Dot} {resting} resting"
-            : $"{_tabs.LiveCount} awake";
+            : $"{_tabs.LiveCount} awake")
+            + (Math.Abs(zoom - 1.0) > 0.001 ? $" {Dot} {zoom * 100:0}%" : string.Empty);
     }
+
+    /// <summary>
+    /// The shield appears only when this page actually lost something. A badge
+    /// that is always on is wallpaper; one that appears exactly when a login
+    /// button stops responding is the explanation the user needs at that moment.
+    /// </summary>
+    private void SyncShield(BrowserTab? active)
+    {
+        if (active is null || active.BlockedCount == 0)
+        {
+            ShieldButton.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        ShieldButton.Visibility = Visibility.Visible;
+        ShieldButton.Content = $"{Shield} {active.BlockedCount}";
+        ShieldButton.ToolTip =
+            $"{active.BlockedCount} embedded frames and media requests were skipped on "
+            + $"{active.HostLabel}, which is how this page costs one renderer instead of "
+            + $"several.\n\nIf a login, payment or video is missing, click to load "
+            + $"{active.HostLabel} in full from now on.";
+    }
+
+    private void Shield_Click(object sender, RoutedEventArgs e) => _tabs?.AllowActiveSite();
 
     private void StartMemorySampling()
     {
@@ -254,12 +468,7 @@ public partial class MainWindow : Window
         if (_tabs?.Active is { } tab) _tabs.Navigate(tab, HomeUrl);
     }
 
-    private void NewTab_Click(object sender, RoutedEventArgs e)
-    {
-        _tabs?.Open(HomeUrl);
-        AddressBar.Focus();
-        AddressBar.SelectAll();
-    }
+    private void NewTab_Click(object sender, RoutedEventArgs e) => NewTab();
 
     private void CloseTab_Click(object sender, RoutedEventArgs e)
     {
@@ -272,13 +481,6 @@ public partial class MainWindow : Window
         if (_syncing || _tabs is null) return;
         if (TabStrip.SelectedItem is BrowserTab tab && !ReferenceEquals(tab, _tabs.Active))
             _ = _tabs.ActivateAsync(tab);
-    }
-
-    private async void LowPower_Changed(object sender, RoutedEventArgs e)
-    {
-        if (_tabs is null) return;
-        await _tabs.SetLowPowerAsync(LowPowerToggle.IsChecked == true);
-        Sync();
     }
 
     // Big Picture ------------------------------------------------------------
@@ -388,22 +590,15 @@ public partial class MainWindow : Window
         await SetBigPictureAsync(false);
     }
 
-    private async void Window_PreviewKeyDown(object sender, KeyEventArgs e)
+    /// <summary>
+    /// The chrome-focus half of the keyboard story. This fires only while focus
+    /// is on WPF -- the address bar, the tab strip, the grid. The moment focus
+    /// enters a page it stops firing entirely, which is why the router also
+    /// hooks each WebView2 directly (k.two-keyboard-paths).
+    /// </summary>
+    private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
-        var showing = BigPicture.Visibility == Visibility.Visible;
-
-        switch (e.Key)
-        {
-            case Key.F11:
-                e.Handled = true;
-                await SetBigPictureAsync(!showing);
-                break;
-
-            // Escape belongs to the page unless the wall is up.
-            case Key.Escape when showing:
-                e.Handled = true;
-                await SetBigPictureAsync(false);
-                break;
-        }
+        if (_router is null) return;
+        if (_router.HandleWpfKey(e)) e.Handled = true;
     }
 }

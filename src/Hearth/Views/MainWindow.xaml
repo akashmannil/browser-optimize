@@ -92,11 +92,6 @@
 
             <StackPanel Grid.Column="1" Orientation="Horizontal"
                         VerticalAlignment="Center" Margin="10,0,8,0">
-                <ToggleButton x:Name="LowPowerToggle"
-                              Style="{StaticResource PillToggle}"
-                              Content="Low power"
-                              ToolTip="Fewer pages awake, and third-party embeds are skipped"
-                              Checked="LowPower_Changed" Unchecked="LowPower_Changed" />
                 <Button x:Name="BigPictureButton"
                         Style="{StaticResource IconButton}"
                         Content="&#xE71B;" FontSize="13"
@@ -138,9 +133,22 @@
                         Content="&#xE80F;" ToolTip="Home" Click="Home_Click" />
             </StackPanel>
 
-            <TextBox x:Name="AddressBar" Grid.Column="1"
-                     Style="{StaticResource AddressField}"
-                     KeyDown="AddressBar_KeyDown" />
+            <Grid Grid.Column="1">
+                <TextBox x:Name="AddressBar"
+                         Style="{StaticResource AddressField}"
+                         KeyDown="AddressBar_KeyDown" />
+
+                <!-- The shield only exists when the filter has actually refused
+                     something on this page. A permanently visible badge is
+                     decoration; one that appears exactly when a login stops
+                     working is an explanation. -->
+                <Button x:Name="ShieldButton"
+                        Style="{StaticResource ShieldPill}"
+                        HorizontalAlignment="Right" VerticalAlignment="Center"
+                        Margin="0,0,6,0"
+                        Visibility="Collapsed"
+                        Click="Shield_Click" />
+            </Grid>
         </Grid>
 
         <!-- ── Row 2 · web content ─────────────────────────────────────── -->
