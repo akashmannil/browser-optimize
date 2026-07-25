@@ -13,6 +13,10 @@ project.lock.json
 project.fragment.lock.json
 artifacts/
 
+# WPF SDK temp projects — the WindowsDesktop SDK drops these beside the csproj
+# during builds and does not always clean them up
+*_wpftmp.csproj
+
 # Visual Studio
 .vs/
 *.VC.db

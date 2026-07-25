@@ -20,7 +20,7 @@ public partial class MainWindow : Window
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
-        _tabs = new TabManager(ContentHost);
+        _tabs = new TabManager(ContentHost, HearthOptions.FromEnvironment());
         _tabs.Changed += (_, _) => Dispatcher.Invoke(Sync);
 
         TabStrip.ItemsSource = _tabs.Tabs;
@@ -32,6 +32,18 @@ public partial class MainWindow : Window
         if (startup.Length == 0)
         {
             _tabs.Open(HomeUrl);
+        }
+        else if (Environment.GetEnvironmentVariable("HEARTH_ACTIVATE_ALL") is "1" or "true")
+        {
+            // Benchmark mode: visit every tab in turn so they all become Live and
+            // the budget actually binds. Without this the budget can't be
+            // measured at all — ordinary startup realises only one tab, so live
+            // count never reaches the ceiling.
+            foreach (var url in startup)
+            {
+                var tab = _tabs.Open(url, activate: false);
+                await _tabs.ActivateAsync(tab);
+            }
         }
         else
         {
@@ -58,8 +70,12 @@ public partial class MainWindow : Window
 
         // Live count is the number the budget in commit 0003 will cap. Showing it
         // now, before it is enforced, gives a baseline to compare against.
+        var o = _tabs.Options;
+        var cap = o.RendererProcessLimit is { } l ? $"{l}" : "∞";
+
         StatusText.Text =
-            $"{_tabs.Tabs.Count} tabs  ·  {_tabs.LiveCount} live  ·  " +
+            $"{_tabs.Tabs.Count} tabs  ·  {_tabs.LiveCount}/{o.LiveTabBudget} live  ·  " +
+            $"{_tabs.HibernatedCount} hibernated  ·  renderer cap {cap}  ·  " +
             $"{active?.Title ?? "—"}";
     }
 

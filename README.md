@@ -33,19 +33,45 @@ Early. Built commit by commit, each with a design note in [`docs/commits/`](docs
 | Commit | What landed |
 | --- | --- |
 | [`0001`](docs/commits/0001-scaffold.md) | Repo, WPF + WebView2 shell, shared environment, docs + knowledge graph |
-| [`0002`](docs/commits/0002-tab-model.md) | Tab model, tab strip, `TabManager` owns the environment; baseline measured |
+| [`0002`](docs/commits/0002-tab-model.md) | Tab model, tab strip, `TabManager` owns the environment |
+| [`0003`](docs/commits/0003-live-budget.md) | Live-tab budget + score-based eviction. **Thesis validated** |
 
-### Measured baseline (commit `0002`, before any eviction exists)
+### Measured (commit `0003`)
 
-| Tabs | Browser processes | Renderers | Total working set |
-| ---: | ---: | ---: | ---: |
-| 1 | 1 | 1 | 304.5 MB |
-| 5 | **1** | **14** | 1170.3 MB |
+Eight real sites, every tab activated so the budget binds. Working set summed over the WebView2
+process tree, filtered to Hearth's own profile:
 
-One browser process across five tabs confirms the shared-environment invariant. But fourteen
-renderers for five tabs is Chromium **site isolation** allocating a renderer per cross-origin
-iframe — so capping live *tabs* does not cap *renderers*. At ~234 MB/tab this currently
-extrapolates worse than Chrome. Flattening that curve is the entire point of the next commits.
+| Configuration | Renderers | Total | Reduction |
+| --- | ---: | ---: | ---: |
+| budget=8 (no eviction) | 21 | 1823 MB | — |
+| budget=3, `TrySuspend` | 10 | 1188 MB | **−35%** |
+| budget=3, full teardown | 5 | 854 MB | **−53%** |
+| budget=1, full teardown | 2 | 628 MB | **−66%** |
+
+And with the budget fixed at 3, varying only how many tabs are open:
+
+| Tabs | Renderers | Total |
+| ---: | ---: | ---: |
+| 4 | 3 | 752 MB |
+| 8 | 5 | 911 MB |
+| 16 | 3 | **548 MB** |
+
+**Sixteen tabs cost less than four.** Memory is decoupled from tab count; the residual variance is
+which *pages* are live when sampling stops, not how many tabs exist.
+
+### Two findings worth knowing
+
+**An embedder has no control over the WebView2 process model.** `--renderer-process-limit` and
+`--process-per-site` reach the browser process — verified in its command line — and are then
+ignored. All configurations produced exactly 14 renderers on the same page. Site isolation is
+permitted to exceed the soft cap, because a cross-origin frame *must* get a dedicated process.
+Renderer count is therefore a function of page content alone, which leaves eviction as the only
+available lever. This is also the strongest argument that WebView2 is a staging post rather than
+the destination — a Gecko fork regains this control via `dom.ipc.processCount`.
+
+**Commit `0002` reported a per-tab cost that was wrong**, and it is retracted in `0003`. Only the
+last startup URL was activated, so that run had one live tab, not five; page complexity was
+misread as per-tab cost. Cold tabs cost nothing: 5× stackoverflow measured identically to 1×.
 
 ## Requirements
 

@@ -52,6 +52,8 @@ graph LR
     D1["d.webview2-shell<br/>Shell, not an engine fork"]
     D2["d.dotnet-wpf<br/>C# / .NET 9 / WPF"]
     D3["d.shared-environment<br/>ONE browser process"]
+    D4["d.eviction-is-the-only-lever<br/>-66% measured"]
+    D5["d.teardown-over-suspend<br/>-53% vs -35%"]
   end
 
   subgraph CONSTRAINTS
@@ -59,14 +61,15 @@ graph LR
     K2["k.widevine-drm"]
     K3["k.windows-only"]
     K4["k.capture-requires-live"]
-    K5["k.site-isolation-multiplies-renderers<br/>5 tabs = 14 renderers"]
+    K5["k.site-isolation-multiplies-renderers<br/>renderers track page content"]
+    K6["k.no-process-model-control<br/>ALL flags ignored"]
   end
 
   subgraph WEBVIEW2_APIS
     A1["api.trysuspend"]
     A2["api.capturepreview"]
     A3["api.memory-target-level"]
-    A4["api.additional-browser-arguments<br/>--renderer-process-limit"]
+    A4["api.additional-browser-arguments<br/>DEAD END"]
   end
 
   subgraph METRICS
@@ -96,8 +99,17 @@ graph LR
   D1 --> A4
   K5 -.constrains.-> D3
   K5 -.constrains.-> M1
-  A4 -.only lever on.-> K5
   C1 --> K5
+
+  K5 --> K6
+  K6 -.supersedes.-> A4
+  K6 -.constrains.-> D1
+  K6 --> D4
+  D4 -.implements.-> C2
+  D4 --> D5
+  D5 -.blocked on.-> A2
+  P3 -.constrains.-> D5
+  A1 -.implements.-> D4
 
   C2 -.measured by.-> M1
   C2 -.measured by.-> M2
@@ -111,22 +123,46 @@ graph LR
   style K3 fill:#742a2a,stroke:#4a1a1a,color:#fff
   style K4 fill:#742a2a,stroke:#4a1a1a,color:#fff
   style K5 fill:#742a2a,stroke:#4a1a1a,color:#fff
+  style K6 fill:#742a2a,stroke:#4a1a1a,color:#fff
+  style D4 fill:#2F855A,stroke:#1a4a30,color:#fff
+  style D5 fill:#2F855A,stroke:#1a4a30,color:#fff
 ```
 
-## Measured baseline (commit `0002`)
+## Measured results (commit `0003`)
 
-Taken **before** any budget or eviction exists — this is the curve the project has to flatten,
-not a result.
+Eight real sites, every tab activated so the budget binds:
 
-| Tabs | Browser processes | Renderers | Total working set |
-| ---: | ---: | ---: | ---: |
-| 1 | 1 | 1 | 304.5 MB |
-| 5 | 1 | **14** | 1170.3 MB |
+| Configuration | Renderers | Total | Reduction |
+| --- | ---: | ---: | ---: |
+| budget=8 (no eviction) | 21 | 1823 MB | — |
+| budget=3, `TrySuspend` | 10 | 1188 MB | −35% |
+| budget=3, full teardown | 5 | 854 MB | −53% |
+| budget=1, full teardown | 2 | 628 MB | −66% |
 
-The browser-process count staying at 1 confirms `d.shared-environment`. The renderer count
-outrunning the tab count 14:5 is `k.site-isolation-multiplies-renderers` — cross-origin iframes
-each get their own renderer. At ~234 MB/tab, naive extrapolation to 100 tabs exceeds 20 GB, which
-is currently *worse* than Chrome.
+Budget fixed at 3, tab count varied — the flatness claim:
+
+| Tabs | Renderers | Total |
+| ---: | ---: | ---: |
+| 4 | 3 | 752 MB |
+| 8 | 5 | 911 MB |
+| 16 | 3 | **548 MB** |
+
+Sixteen tabs cost less than four. Memory is decoupled from tab count (`c.hibernate-by-default`
+validated). Residual variance is which pages are live at sample time, not how many tabs exist.
+
+### Retraction
+
+Commit `0002` claimed ~234 MB/tab extrapolating past 20 GB at 100 tabs. **Retracted.** That run
+had one live tab, not five — only the last startup URL is activated — so 14 renderers and 1170 MB
+belonged to stackoverflow.com alone. Cold tabs cost nothing: 5× stackoverflow measured identically
+to 1×. Always report live tab count beside open tab count.
+
+### Dead end
+
+No Chromium process-model switch has any effect through WebView2 (`k.no-process-model-control`).
+`--renderer-process-limit=4`, `--process-per-site`, and both together all produced exactly 14
+renderers on the same page, with the flag verified present in the browser process command line.
+Eviction is the only lever that exists here.
 
 ## Component map
 
@@ -134,13 +170,18 @@ is currently *worse* than Chrome.
 graph TD
   APP["cmp.app<br/>App.xaml.cs<br/>owns StoreRoot"]
   MW["cmp.mainwindow<br/>Views/MainWindow.xaml.cs<br/>shell + tab strip"]
-  TM["cmp.tabmanager<br/>Core/TabManager.cs<br/>OWNS shared environment"]
+  TM["cmp.tabmanager<br/>Core/TabManager.cs<br/>OWNS shared environment<br/>enforces the budget"]
   BT["cmp.browsertab<br/>Core/BrowserTab.cs<br/>durable tab identity"]
   TS["cmp.tabstate<br/>Core/TabState.cs<br/>Live/Warm/Hibernated/Cold"]
+  EP["cmp.evictionpolicy<br/>Core/EvictionPolicy.cs<br/>scores eviction victims"]
+  HO["cmp.hearthoptions<br/>Core/HearthOptions.cs<br/>all memory tunables"]
 
   MW --> TM
   TM --> APP
   TM --> BT
+  TM --> EP
+  TM --> HO
+  EP --> BT
   BT --> TS
 
   style APP fill:#2B2D31,stroke:#8A8D93,color:#E3E3E3
@@ -148,6 +189,8 @@ graph TD
   style TM  fill:#2B6CB0,stroke:#1a4a7a,color:#fff
   style BT  fill:#2B2D31,stroke:#8A8D93,color:#E3E3E3
   style TS  fill:#2B2D31,stroke:#8A8D93,color:#E3E3E3
+  style EP  fill:#2F855A,stroke:#1a4a30,color:#fff
+  style HO  fill:#2B2D31,stroke:#8A8D93,color:#E3E3E3
 ```
 
 `TabManager` is highlighted because it holds the `d.shared-environment` invariant: it is the only
@@ -174,14 +217,19 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 | `k.widevine-drm` | constraint | DRM needs a licence, not code |
 | `k.windows-only` | constraint | WebView2 is Windows-only in practice |
 | `k.capture-requires-live` | constraint | Screenshot on blur, never after evict |
-| `k.site-isolation-multiplies-renderers` | constraint | 5 tabs produced 14 renderers; capping tabs ≠ capping renderers |
+| `k.site-isolation-multiplies-renderers` | constraint | Renderer count tracks page content, not tab count |
+| `k.no-process-model-control` | constraint | **Every** Chromium process flag is ignored by WebView2 |
+| `d.eviction-is-the-only-lever` | decision | Flags moved nothing; eviction moved 66% |
+| `d.teardown-over-suspend` | decision | Teardown −53% vs suspend −35%; gated until `0004` |
 | `api.trysuspend` | api | Hibernation tier 1 |
 | `api.capturepreview` | api | Visual placeholder source |
 | `api.memory-target-level` | api | Cheap intermediate tier |
-| `api.additional-browser-arguments` | api | Only embedder lever on the process model |
+| `api.additional-browser-arguments` | api | Dead end — plumbed correctly, ignored downstream |
 | `cmp.tabmanager` | component | Owns the shared environment — the load-bearing invariant |
 | `cmp.browsertab` | component | Tab identity that outlives its renderer |
 | `cmp.tabstate` | component | Four-state lifecycle enum |
+| `cmp.evictionpolicy` | component | Recency × habit scoring; future home of refindability |
+| `cmp.hearthoptions` | component | Tunables + env overrides for A/B benchmarking |
 | `m.steady-state-ceiling` | metric | Flat working set as tabs grow |
 | `m.restore-fidelity` | metric | Users must not feel eviction |
 | `m.reclaim-delta` | metric | Bytes returned per eviction |
