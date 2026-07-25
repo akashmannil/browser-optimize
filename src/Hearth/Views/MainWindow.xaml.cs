@@ -1,7 +1,10 @@
+using System.Diagnostics;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using Hearth.Core;
 
 namespace Hearth.Views;
@@ -22,6 +25,16 @@ public partial class MainWindow : Window
     {
         _tabs = new TabManager(ContentHost, HearthOptions.FromEnvironment());
         _tabs.Changed += (_, _) => Dispatcher.Invoke(Sync);
+        _tabs.Rehydrating += (_, tab) => Dispatcher.Invoke(() => ShowPlaceholder(tab));
+
+        // The placeholder is held for a beat after the renderer returns: the
+        // controller reports ready before it has painted, and dropping the
+        // image on that signal shows a white flash instead of hiding one.
+        _tabs.Rehydrated += (_, _) => Dispatcher.InvokeAsync(async () =>
+        {
+            await Task.Delay(220);
+            HidePlaceholder();
+        });
 
         TabStrip.ItemsSource = _tabs.Tabs;
 
@@ -94,6 +107,46 @@ public partial class MainWindow : Window
                 : "https://duckduckgo.com/?q=" + Uri.EscapeDataString(raw);
 
         _tabs.Navigate(active, url);
+    }
+
+    /// <summary>
+    /// Paints the tab's captured frame while its renderer is rebuilt, then
+    /// clears it once live content is behind it. The image is loaded
+    /// OnLoad + cached so the file handle is released immediately — otherwise a
+    /// later capture to the same path fails with a sharing violation.
+    /// </summary>
+    private void ShowPlaceholder(BrowserTab tab)
+    {
+        if (_tabs?.Snapshots.Get(tab.Id) is not { } snap || !File.Exists(snap.ImagePath))
+        {
+            HidePlaceholder();
+            return;
+        }
+
+        try
+        {
+            var bmp = new BitmapImage();
+            bmp.BeginInit();
+            bmp.CacheOption = BitmapCacheOption.OnLoad;
+            bmp.CreateOptions = BitmapCreateOptions.IgnoreImageCache;
+            bmp.UriSource = new Uri(snap.ImagePath);
+            bmp.EndInit();
+            bmp.Freeze();
+
+            Placeholder.Source = bmp;
+            Placeholder.Visibility = Visibility.Visible;
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[hearth] placeholder load failed: {ex.Message}");
+            HidePlaceholder();
+        }
+    }
+
+    private void HidePlaceholder()
+    {
+        Placeholder.Visibility = Visibility.Collapsed;
+        Placeholder.Source = null;
     }
 
     private void GoButton_Click(object sender, RoutedEventArgs e) => Navigate();

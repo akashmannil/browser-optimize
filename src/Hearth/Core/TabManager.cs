@@ -44,12 +44,25 @@ public sealed class TabManager
 
     public ReadOnlyObservableCollection<BrowserTab> Tabs { get; }
 
+    /// <summary>Screenshots and scroll state for tabs that hold no renderer.</summary>
+    public SnapshotStore Snapshots { get; } = new();
+
     public BrowserTab? Active { get; private set; }
 
     public HearthOptions Options => _options;
 
     /// <summary>Raised when the active tab changes or any tab's state changes.</summary>
     public event EventHandler? Changed;
+
+    /// <summary>
+    /// Raised when activating a tab that holds no renderer, before rebuilding
+    /// starts. The shell paints the tab's captured frame here so the rebuild
+    /// happens behind an image of the page rather than behind nothing.
+    /// </summary>
+    public event EventHandler<BrowserTab>? Rehydrating;
+
+    /// <summary>Raised once live content is behind the placeholder.</summary>
+    public event EventHandler<BrowserTab>? Rehydrated;
 
     /// <summary>Tabs currently holding a full renderer. This is what the budget caps.</summary>
     public int LiveCount => _tabs.Count(t => t.State == TabState.Live);
@@ -103,10 +116,28 @@ public sealed class TabManager
     {
         if (!_tabs.Contains(tab)) return;
 
+        // A tab with no controller has to be rebuilt from scratch, which is the
+        // only case the user could otherwise see as a blank pane.
+        var needsRebuild = tab.View is null && Snapshots.Has(tab.Id);
+        if (needsRebuild) Rehydrating?.Invoke(this, tab);
+
         await _budgetGate.WaitAsync();
         try
         {
+            // Capture the OUTGOING tab before anything else touches visibility.
+            // CapturePreviewAsync can only photograph a controller that is still
+            // visible and painted (k.capture-requires-live), so blur is the last
+            // moment a snapshot can be taken — by eviction time the tab has long
+            // since been collapsed and there is nothing left to photograph.
+            if (Active is { } outgoing
+                && !ReferenceEquals(outgoing, tab)
+                && outgoing.View?.CoreWebView2 is not null)
+            {
+                await Snapshots.CaptureAsync(outgoing);
+            }
+
             await RealiseAsync(tab);
+            if (needsRebuild) Rehydrated?.Invoke(this, tab);
 
             Active = tab;
             tab.LastActivatedUtc = DateTime.UtcNow;
@@ -158,12 +189,15 @@ public sealed class TabManager
 
         tab.View.Visibility = Visibility.Collapsed;
 
-        // Full teardown reclaims the renderer outright rather than suspending it.
-        // Gated because without the screenshot placeholder from commit 0004 a
-        // torn-down tab reloads visibly on return, which is precisely the
-        // papercut that makes users disable every other suspender
-        // (p.lossy-restore).
-        if (_options.AllowFullTeardown)
+        // No capture here — by this point the tab was collapsed at blur and
+        // cannot be photographed. We rely on the snapshot taken when the user
+        // switched away from it, which is the only moment one was available.
+        //
+        // Teardown is permitted only when such a snapshot exists: evicting a tab
+        // we cannot repaint is the exact papercut that makes users disable every
+        // other suspender (p.lossy-restore). Without one we fall back to
+        // suspension, which at least keeps the page there to look at.
+        if (_options.AllowFullTeardown && Snapshots.Has(tab.Id))
         {
             Destroy(tab);
             return;
@@ -225,6 +259,15 @@ public sealed class TabManager
             Changed?.Invoke(this, EventArgs.Empty);
         };
 
+        // Returning a rehydrated tab to the top of the page is the most-noticed
+        // restore failure in every other suspender, so replay the captured
+        // offset as soon as the document is ready.
+        core.NavigationCompleted += async (_, e) =>
+        {
+            if (e.IsSuccess) await Snapshots.RestoreScrollAsync(tab);
+            Changed?.Invoke(this, EventArgs.Empty);
+        };
+
         core.Navigate(tab.Url);
         tab.State = TabState.Live;
     }
@@ -240,6 +283,7 @@ public sealed class TabManager
         if (!_tabs.Remove(tab)) return;
 
         Destroy(tab);
+        Snapshots.Forget(tab.Id);
 
         if (ReferenceEquals(Active, tab))
         {

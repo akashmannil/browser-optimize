@@ -364,7 +364,7 @@
 
 <script>
 const DATA = {
-  rev: "0003",
+  rev: "0004",
   nodeTypes: {
     problem:"An observed problem the project exists to solve",
     concept:"A mental model used to reason about the system",
@@ -384,7 +384,7 @@ const DATA = {
     {id:"c.process-overhead-dominates",type:"concept",label:"Per-renderer baseline dominates browser memory",summary:"A Chromium renderer costs roughly 40–80 MB for a blank page (V8 isolate, Blink, Mojo, sandbox) before any content loads.",implication:"Any memory strategy that does not reduce the number of live renderers is treating a symptom."},
     {id:"c.tab-taxonomy",type:"concept",label:"A tab strip holds five different data types",summary:"Active work, a todo, a reference doc, a read-later item, and a fear-of-loss artifact all wear the same UI costume. Applying one lifecycle policy to all five is why every existing tool fails."},
     {id:"c.refindability",type:"concept",label:"Refindability score",summary:"How hard a tab would be to recover if closed. A homepage is trivially refindable; a filtered dashboard view or half-filled form is not. Aggressive eviction is acceptable only for the former.",status:"planned"},
-    {id:"c.ram-for-disk-trade",type:"concept",label:"Trade RAM for disk at ~200:1",summary:"A hibernated tab costs a WebP screenshot plus serialised state, roughly 150 KB on disk, versus 40–80 MB of RAM live. 200 hibernated tabs fit in ~40 MB of disk."},
+    {id:"c.ram-for-disk-trade",type:"concept",label:"Trade RAM for disk (measured ~8,000:1)",summary:"A hibernated tab costs a screenshot plus serialised state on disk, versus tens to hundreds of MB of RAM live.",implication:"Measured at 0004: 26.8 KB average per PNG across 7 real sites, against roughly 230 MB marginal cost per live tab — about 8,000:1, some forty times better than the 200:1 predicted. Disk is effectively free; 1,000 hibernated tabs would occupy ~27 MB, so there is no reason to ration or downscale snapshots."},
     {id:"c.hibernate-by-default",type:"concept",label:"Hibernated is the default state, live is the exception",summary:"Every other browser treats loaded as default and unloading as an emergency. Chrome Memory Saver and Firefox tab unloading are reactive, triggering only under memory pressure. Hearth inverts this: tabs are documents on disk, temporarily instantiated under a hard budget.",thesis:true},
 
     {id:"d.webview2-shell",type:"decision",label:"Build a shell on WebView2 rather than fork an engine",summary:"WebView2 provides the modern web for free and exposes the primitives this architecture needs: TrySuspend/Resume, CapturePreview, MemoryUsageTargetLevel.",rationale:"De-risk the product thesis on the cheap substrate first. If screenshot-backed restore does not feel convincing here, a Gecko fork inherits the same failure.",revisit_if:"Shell-level control proves insufficient to hold a hard memory ceiling, or cross-platform support becomes a requirement."},
@@ -396,7 +396,7 @@ const DATA = {
     {id:"k.no-per-tab-memory-api",type:"constraint",label:"No per-tab memory API is exposed",summary:"Neither WebView2 nor Chromium exposes per-renderer memory to embedders.",workaround:"Measure the working set of the WebView2 process tree before and after eviction; attribute the delta to the evicted tab. Self-calibrating over time."},
     {id:"k.widevine-drm",type:"constraint",label:"Widevine DRM requires a licence agreement",summary:"Netflix, Spotify and Prime need Widevine. WebView2 inherits Edge's support, but a shipped product needs a licence relationship with Google. Not a coding problem.",severity:"blocks commercial release"},
     {id:"k.windows-only",type:"constraint",label:"WebView2 is Windows-only in practice",summary:"Cross-platform would require CEF, Tauri's wry, or a per-OS webview abstraction."},
-    {id:"k.capture-requires-live",type:"constraint",label:"CapturePreview requires a live, realised WebView2",summary:"A screenshot can only be taken while the WebView2 still exists and has rendered. Capture must happen at tab-blur, immediately before eviction, never after.",implication:"A tab restored from a cold session has no screenshot until it has been live once."},
+    {id:"k.capture-requires-live",type:"constraint",label:"CapturePreview requires a live, realised WebView2",summary:"A screenshot can only be taken while the WebView2 still exists and has rendered. Capture must happen at tab-blur, immediately before eviction, never after.",implication:"A tab restored from a cold session has no screenshot until it has been live once.",known_lever:"VIOLATED in 0004 — the first implementation captured inside HibernateAsync, which runs after the outgoing tab has already been collapsed. Every capture produced a 0-byte file. The correct place to capture is not where eviction happens, it is where focus leaves.",blocked_on:"Never write the capture stream straight to a file: a failed capture leaves a 0-byte PNG indistinguishable from a real snapshot, which would license a teardown that cannot be repainted. Buffer and check length first."},
     {id:"k.site-isolation-multiplies-renderers",type:"constraint",label:"Renderer count exceeds tab count because of site isolation",summary:"WebView2 inherits Chromium site isolation, which allocates a renderer per site instance including cross-origin iframes.",discovered_in:"0002",implication:"A shared environment guarantees one BROWSER process, not one renderer per tab. Capping live tabs alone does not cap renderers.",known_lever:"RETRACTED in 0003 — --renderer-process-limit was assumed to be the lever; it is not."},
     {id:"k.no-process-model-control",type:"constraint",label:"An embedder has NO control over the WebView2 process model",summary:"Chromium process-model switches passed via AdditionalBrowserArguments reach the browser process and are then ignored. On stackoverflow.com with 1 live tab: no flags = 14 renderers; --renderer-process-limit=4 = 14; --process-per-site = 14; both = 14. The flag was verified present in the browser process command line, so this is not a plumbing bug.",discovered_in:"0003",severity:"architectural",implication:"Renderer count is a function of page content alone. The ONLY memory lever available to a WebView2 embedder is reducing live tabs — i.e. eviction. This validates hibernate-by-default by elimination: not merely the best approach on this substrate, the only one.",informs_v2:"A Gecko fork regains this control, since dom.ipc.processCount genuinely caps the content-process pool. The strongest single argument for WebView2 being a staging post rather than the destination."},
 
@@ -406,7 +406,7 @@ const DATA = {
     {id:"api.memory-target-level",type:"api",label:"CoreWebView2.MemoryUsageTargetLevel",summary:"Hints that a WebView2 should minimise memory usage. Cheaper and lower-fidelity than TrySuspend; usable as an intermediate tier for recently-blurred tabs.",docs:"https://learn.microsoft.com/dotnet/api/microsoft.web.webview2.core.corewebview2.memoryusagetargetlevel"},
 
     {id:"m.steady-state-ceiling",type:"metric",label:"Steady-state working set at high tab count",summary:"Target: total working set stays flat as tab count grows. Chrome at 100 tabs is 6–10 GB, Firefox 2–4 GB.",status:"achieved",hasData:true},
-    {id:"m.restore-fidelity",type:"metric",label:"Restore fidelity",summary:"Whether a rehydrated tab returns to the same scroll offset, form state and media position. The product thesis fails if users can feel eviction happening.",status:"not yet measured"},
+    {id:"m.restore-fidelity",type:"metric",label:"Restore fidelity",summary:"Whether a rehydrated tab returns to the same scroll offset, form state and media position. The product thesis fails if users can feel eviction happening.",status:"partially implemented",implication:"Done in 0004: screenshot placeholder during rebuild, plus scroll offset captured at blur and replayed on load. 7 of 7 blur events captured cleanly across 8 real sites.",blocked_on:"Still missing form values, sessionStorage, media currentTime, and per-container scroll. A torn-down tab still performs a real network reload — the placeholder hides the rebuild rather than removing it. No human has yet confirmed the swap is imperceptible; the 220 ms placeholder hold is a guess, not a measurement."},
     {id:"m.reclaim-delta",type:"metric",label:"Memory reclaimed per eviction",summary:"Working-set bytes returned to the OS by evicting one tab. Doubles as the per-tab cost estimate that makes the invisible cost legible to users.",status:"not yet measured"},
 
     {id:"cmp.app",type:"component",label:"App / StoreRoot",file:"src/Hearth/App.xaml.cs",summary:"Application entry point. Owns StoreRoot, the single on-disk location for the WebView2 user-data folder, hibernation screenshots and the session index."},
@@ -419,7 +419,9 @@ const DATA = {
 
     {id:"commit.0001",type:"commit",label:"0001 — scaffold",summary:"Repo initialised, WPF + WebView2 shell builds and navigates, documentation and knowledge-graph structure established.",doc:"docs/commits/0001-scaffold.md"},
     {id:"commit.0002",type:"commit",label:"0002 — tab model",summary:"Tab abstraction and TabManager introduced; environment ownership moved out of the window. Its per-tab cost interpretation was retracted in 0003.",doc:"docs/commits/0002-tab-model.md"},
-    {id:"commit.0003",type:"commit",label:"0003 — live budget and eviction",summary:"Live-tab budget with score-based eviction. Established that no Chromium process-model flag has any effect through WebView2, that eviction is therefore the only lever, and that under a fixed budget memory is fully decoupled from tab count.",doc:"docs/commits/0003-live-budget.md"}
+    {id:"commit.0003",type:"commit",label:"0003 — live budget and eviction",summary:"Live-tab budget with score-based eviction. Established that no Chromium process-model flag has any effect through WebView2, that eviction is therefore the only lever, and that under a fixed budget memory is fully decoupled from tab count.",doc:"docs/commits/0003-live-budget.md"},
+    {id:"commit.0004",type:"commit",label:"0004 — screenshot-backed hibernation",summary:"Snapshot capture at blur, scroll replay on restore, placeholder painting during rebuild, and teardown enabled by default gated on holding a snapshot. Also corrected the measurement harness and re-measured — 0003's figures were sampled before runs had settled.",doc:"docs/commits/0004-snapshot-hibernation.md"},
+    {id:"cmp.snapshotstore",type:"component",label:"SnapshotStore",file:"src/Hearth/Core/SnapshotStore.cs",summary:"Captures and persists a tab's last painted frame plus its scroll offset, and replays the offset on rehydrate. What makes teardown survivable: an evicted tab renders its own last frame rather than going blank.",invariant:"Capture only ever happens at blur, on the outgoing tab, before any visibility change. Never write the capture stream straight to a file — buffer it and check for non-zero length first."}
   ],
   edges: [
     ["p.tab-hoarding","motivated_by","p.archive-blackhole"],
@@ -483,7 +485,14 @@ const DATA = {
     ["cmp.evictionpolicy","introduced_in","commit.0003"],
     ["k.no-process-model-control","introduced_in","commit.0003"],
     ["d.eviction-is-the-only-lever","introduced_in","commit.0003"],
-    ["d.teardown-over-suspend","introduced_in","commit.0003"]
+    ["d.teardown-over-suspend","introduced_in","commit.0003"],
+    ["cmp.snapshotstore","implements","api.capturepreview"],
+    ["cmp.snapshotstore","implements","c.ram-for-disk-trade"],
+    ["cmp.snapshotstore","implements","d.teardown-over-suspend"],
+    ["cmp.snapshotstore","measured_by","m.restore-fidelity"],
+    ["k.capture-requires-live","constrains","cmp.snapshotstore"],
+    ["cmp.tabmanager","depends_on","cmp.snapshotstore"],
+    ["cmp.snapshotstore","introduced_in","commit.0004"]
   ]
 };
 

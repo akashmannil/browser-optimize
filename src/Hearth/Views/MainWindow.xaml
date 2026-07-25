@@ -115,8 +115,22 @@
 
         <!-- Content host: every realised WebView2 lives here, only the active one
              is Visible. Collapsed is not merely cosmetic — an invisible controller
-             is a precondition for TrySuspend() in commit 0003. -->
-        <Grid x:Name="ContentHost" Grid.Row="2" />
+             is a precondition for TrySuspend(). -->
+        <Grid Grid.Row="2">
+            <Grid x:Name="ContentHost" />
+
+            <!-- The evicted tab's own last frame, painted while its renderer is
+                 being rebuilt. Sits above the content host so the swap to live
+                 content happens underneath it rather than as a visible flash. -->
+            <Image x:Name="Placeholder"
+                   Panel.ZIndex="10"
+                   Visibility="Collapsed"
+                   Stretch="Uniform"
+                   StretchDirection="DownOnly"
+                   HorizontalAlignment="Center"
+                   VerticalAlignment="Top"
+                   RenderOptions.BitmapScalingMode="HighQuality" />
+        </Grid>
 
         <!-- Status strip: becomes the live memory budget readout in commit 0005 -->
         <Border Grid.Row="3" Background="{StaticResource ChromeField}" Padding="10,5">

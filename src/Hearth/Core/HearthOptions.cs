@@ -70,12 +70,17 @@ public sealed record HearthOptions
     }
 
     /// <summary>
-    /// Whether an evicted tab is suspended (controller retained, fast resume) or
-    /// torn down completely. Full teardown lands in commit 0004; until the
-    /// screenshot placeholder exists, tearing down would leave a visibly blank
-    /// tab and break the "eviction is imperceptible" requirement.
+    /// Whether an evicted tab is torn down completely (controller destroyed)
+    /// rather than merely suspended. Teardown reclaims 53% against suspension's
+    /// 35% on the same workload, so it carries the memory promise.
+    ///
+    /// ON by default since commit 0004: teardown is now gated on holding a
+    /// snapshot to repaint from, so an evicted tab shows its own last frame
+    /// instead of going blank. TabManager falls back to suspension whenever a
+    /// capture fails, which keeps the guarantee honest without giving up the
+    /// reclaim in the common case.
     /// </summary>
-    public bool AllowFullTeardown { get; init; } = false;
+    public bool AllowFullTeardown { get; init; } = true;
 
     public static HearthOptions Default { get; } = new();
 
@@ -102,9 +107,20 @@ public sealed record HearthOptions
         if (Environment.GetEnvironmentVariable("HEARTH_PROCESS_PER_SITE") is "1" or "true")
             options = options with { ProcessPerSite = true };
 
-        if (Environment.GetEnvironmentVariable("HEARTH_FULL_TEARDOWN") is "1" or "true")
-            options = options with { AllowFullTeardown = true };
+        // Bidirectional: a flag that can only be switched ON cannot be A/B
+        // tested against its own absence on a single build, and comparing across
+        // builds is how commit 0002 produced a number it had to retract.
+        if (Flag("HEARTH_FULL_TEARDOWN") is { } teardown)
+            options = options with { AllowFullTeardown = teardown };
 
         return options;
     }
+
+    private static bool? Flag(string name) =>
+        Environment.GetEnvironmentVariable(name) switch
+        {
+            "1" or "true" or "TRUE" => true,
+            "0" or "false" or "FALSE" => false,
+            _ => null
+        };
 }

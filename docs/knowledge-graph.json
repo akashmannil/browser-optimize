@@ -1,8 +1,8 @@
-{
+﻿{
   "project": "hearth",
   "description": "A low-resource Windows browser shell built on WebView2, whose core bet is that hibernated is a tab's default state and live is a budgeted exception.",
   "schema_version": "1.0",
-  "graph_updated_at_commit": "0003",
+  "graph_updated_at_commit": "0004",
   "consumer_notes": "This file is the authoritative machine-readable model of WHY this codebase is shaped the way it is. Source code records what the system does; this graph records the reasoning, the rejected alternatives, and the constraints that must not be violated. Agents should read this before proposing architectural changes. Every node has a stable `id` that is safe to reference in commits, issues, and other documents. When you add a feature, add its nodes/edges here in the same commit.",
 
   "node_types": {
@@ -76,8 +76,11 @@
     {
       "id": "c.ram-for-disk-trade",
       "type": "concept",
-      "label": "Trade RAM for disk at ~200:1",
-      "summary": "A hibernated tab costs a WebP screenshot plus serialised state, roughly 150 KB on disk, versus 40-80 MB of RAM live. 200 hibernated tabs fit in ~40 MB of disk."
+      "label": "Trade RAM for disk (measured ~8,000:1)",
+      "summary": "A hibernated tab costs a screenshot plus serialised state on disk, versus tens to hundreds of MB of RAM live.",
+      "predicted": "~150 KB per snapshot, ~200:1 against a 40-80 MB tab.",
+      "measured_0004": "26.8 KB average per PNG snapshot across 7 real sites (188 KB total). Marginal cost of one live tab measured at roughly 230 MB on the same workload, giving a real trade nearer 8,000:1 -- around forty times better than predicted. PNG was expected to be the wasteful choice; page screenshots compress well because large areas are flat colour.",
+      "implication": "Disk cost is effectively free at any realistic tab count. 1,000 hibernated tabs would occupy roughly 27 MB. There is no reason to ration snapshots or downscale them for space."
     },
     {
       "id": "c.hibernate-by-default",
@@ -136,7 +139,9 @@
       "type": "constraint",
       "label": "CapturePreview requires a live, realised WebView2",
       "summary": "A screenshot can only be taken while the WebView2 still exists and has rendered. The capture must therefore happen at tab-BLUR, immediately before eviction, never after.",
-      "implication": "A tab restored from a cold session has no screenshot until it has been live once."
+      "implication": "A tab restored from a cold session has no screenshot until it has been live once.",
+      "violated_in_0004": "The first implementation captured inside HibernateAsync, which runs AFTER ActivateAsync has already collapsed the outgoing tab. A collapsed controller has nothing to photograph, so every capture produced a 0-byte file. Fixed by capturing the outgoing tab in ActivateAsync before any visibility change. Recorded because the constraint was written down first and still got violated -- the correct place to capture is not where eviction happens, it is where focus leaves.",
+      "corollary": "Never write a captured file directly from the capture stream. A failed capture leaves a 0-byte PNG that is indistinguishable from a real snapshot at the call site, and would license a teardown that cannot be repainted. Buffer in memory and only write on non-zero length."
     },
 
     {
@@ -147,7 +152,7 @@
       "discovered_in": "0002",
       "implication": "A shared environment guarantees one BROWSER process, not one renderer per tab. Capping live tabs alone does not cap renderers; ad-heavy or widget-heavy pages fan out. This makes eviction MORE valuable than the original 40-80 MB per-tab estimate implied, not less.",
       "known_lever": "RETRACTED in 0003. --renderer-process-limit was assumed to be the lever; it is not. See k.no-process-model-control.",
-      "tradeoff": "Moot — the lever does not exist. Site isolation cannot be traded away from the embedder side at all."
+      "tradeoff": "Moot â€” the lever does not exist. Site isolation cannot be traded away from the embedder side at all."
     },
     {
       "id": "k.no-process-model-control",
@@ -173,7 +178,9 @@
       "label": "Full teardown is the real lever; TrySuspend is a half-measure",
       "summary": "At budget=3 over the same 8-site workload, TrySuspend reclaimed 35% (1823 -> 1188 MB) while destroying the controller reclaimed 53% (1823 -> 854 MB). Suspension retains the controller and therefore a large share of the cost.",
       "rationale": "TrySuspend is worth keeping as the fast-resume tier for recently-blurred tabs, but it cannot carry the memory promise on its own.",
-      "blocked_on": "Full teardown stays OFF by default until the screenshot placeholder in 0004 exists, because a torn-down tab currently reloads visibly on return -- exactly the p.lossy-restore papercut that makes users disable every other suspender."
+      "unblocked_in": "0004",
+      "status": "ON by default since 0004, gated on holding a snapshot. TabManager falls back to suspension whenever no snapshot exists for a tab, so the reclaim is taken in the common case without ever evicting a page that cannot be repainted.",
+      "reconfirmed_0004": "On a corrected harness (one build, 95s settle) suspension reclaimed 32% and teardown 49% against the same 8-tab baseline, preserving the ordering established in 0003."
     },
     {
       "id": "api.additional-browser-arguments",
@@ -223,6 +230,15 @@
         "budget_3_teardown":     { "renderers": 5,  "total_mb": 854.0,  "reduction_pct": 53 },
         "budget_1_teardown":     { "renderers": 2,  "total_mb": 627.7,  "reduction_pct": 66 }
       },
+      "measured_0004": {
+        "method": "Corrected harness: ONE build, 95s settle, only the teardown flag varied. Supersedes measured_0003, which sampled at 40s before the activation sequence had finished loading all 8 tabs and therefore compared partially-loaded runs.",
+        "baseline_no_eviction": { "renderers": 22, "total_mb": 2233.8 },
+        "budget_3_suspend":     { "renderers": 15, "total_mb": 1519.6, "reduction_pct": 32 },
+        "budget_3_teardown":    { "renderers": 8,  "total_mb": 1149.7, "reduction_pct": 49 },
+        "budget_1_teardown":    { "renderers": 2,  "total_mb": 625.0,  "reduction_pct": 72 },
+        "note": "The baseline is higher than 0003's (2234 vs 1823 MB) because every tab now fully loads before sampling. Reduction percentages hold their shape, and the deepest budget improved from 66% to 72%. Conclusions from 0003 are unchanged; only the numbers are now trustworthy.",
+        "harness_fix": "HEARTH_FULL_TEARDOWN was previously settable only to ON, making it impossible to A/B against its own absence on a single build. Now bidirectional. A flag that cannot be turned off cannot be measured."
+      },
       "flatness_0003": {
         "method": "budget=3, full teardown, tab count varied.",
         "4_tabs":  { "renderers": 3, "total_mb": 751.9 },
@@ -236,7 +252,10 @@
       "type": "metric",
       "label": "Restore fidelity",
       "summary": "Whether a rehydrated tab returns to the same scroll offset, form state and media position. The product thesis fails if users can feel eviction happening.",
-      "status": "not-yet-measured"
+      "status": "partially-implemented",
+      "done_0004": "Screenshot placeholder painted during rebuild, and scroll offset captured at blur and replayed on NavigationCompleted. 7 of 7 blur events produced valid captures across 8 real sites.",
+      "still_missing": "Form field values, sessionStorage, media currentTime, and per-scroll-container offsets (only window scroll is restored). A torn-down tab still performs a real network reload, so restore is not instant -- the placeholder hides the rebuild rather than removing it.",
+      "unverified": "No human has yet confirmed the swap from placeholder to live content is imperceptible. The 220 ms hold before dropping the placeholder is a guess, not a measurement, and is the most likely source of a visible flash."
     },
     {
       "id": "m.reclaim-delta",
@@ -273,7 +292,7 @@
       "type": "component",
       "label": "BrowserTab",
       "file": "src/Hearth/Core/BrowserTab.cs",
-      "summary": "A tab's durable identity: URL, title, activation history. Deliberately NOT a WebView2 wrapper — the View property is nullable and null is the expected steady state. Carries LastActivatedUtc and ActivationCount to drive eviction ordering.",
+      "summary": "A tab's durable identity: URL, title, activation history. Deliberately NOT a WebView2 wrapper â€” the View property is nullable and null is the expected steady state. Carries LastActivatedUtc and ActivationCount to drive eviction ordering.",
       "invariant": "Null View must never be treated as an error condition. Tabs are documents; renderers are a cache."
     },
     {
@@ -304,6 +323,21 @@
       "label": "0003 - live budget and eviction",
       "summary": "Live-tab budget with score-based eviction. Established that no Chromium process-model flag has any effect through WebView2, that eviction is therefore the only lever, and that under a fixed budget memory is fully decoupled from tab count. Retracts 0002's per-tab cost claim.",
       "doc": "docs/commits/0003-live-budget.md"
+    },
+    {
+      "id": "cmp.snapshotstore",
+      "type": "component",
+      "label": "SnapshotStore",
+      "file": "src/Hearth/Core/SnapshotStore.cs",
+      "summary": "Captures and persists a tab's last painted frame plus its scroll offset, and replays the offset on rehydrate. This is what makes teardown survivable: an evicted tab renders its own last frame rather than going blank.",
+      "invariant": "Capture only ever happens at blur, on the outgoing tab, before any visibility change. Never write the capture stream straight to a file -- buffer it and check for non-zero length first."
+    },
+    {
+      "id": "commit.0004",
+      "type": "commit",
+      "label": "0004 - screenshot-backed hibernation",
+      "summary": "Snapshot capture at blur, scroll replay on restore, placeholder painting during rebuild, and teardown enabled by default gated on holding a snapshot. Also corrected the measurement harness and re-measured; 0003's figures were sampled before runs had settled.",
+      "doc": "docs/commits/0004-snapshot-hibernation.md"
     },
     {
       "id": "cmp.hearthoptions",
@@ -398,6 +432,15 @@
     { "from": "cmp.evictionpolicy",    "rel": "introduced_in", "to": "commit.0003" },
     { "from": "k.no-process-model-control",   "rel": "introduced_in", "to": "commit.0003" },
     { "from": "d.eviction-is-the-only-lever", "rel": "introduced_in", "to": "commit.0003" },
-    { "from": "d.teardown-over-suspend",      "rel": "introduced_in", "to": "commit.0003" }
+    { "from": "d.teardown-over-suspend",      "rel": "introduced_in", "to": "commit.0003" },
+
+    { "from": "cmp.snapshotstore", "rel": "implements",   "to": "api.capturepreview" },
+    { "from": "cmp.snapshotstore", "rel": "implements",   "to": "c.ram-for-disk-trade" },
+    { "from": "cmp.snapshotstore", "rel": "implements",   "to": "d.teardown-over-suspend", "note": "Teardown is gated on a snapshot existing; without one TabManager falls back to suspension." },
+    { "from": "cmp.snapshotstore", "rel": "measured_by",  "to": "m.restore-fidelity" },
+    { "from": "k.capture-requires-live", "rel": "constrains", "to": "cmp.snapshotstore", "note": "Violated by the first implementation, which captured after the tab was already collapsed." },
+    { "from": "cmp.tabmanager",    "rel": "depends_on",   "to": "cmp.snapshotstore" },
+    { "from": "cmp.snapshotstore", "rel": "introduced_in", "to": "commit.0004" }
   ]
 }
+

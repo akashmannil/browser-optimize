@@ -35,18 +35,24 @@ Early. Built commit by commit, each with a design note in [`docs/commits/`](docs
 | [`0001`](docs/commits/0001-scaffold.md) | Repo, WPF + WebView2 shell, shared environment, docs + knowledge graph |
 | [`0002`](docs/commits/0002-tab-model.md) | Tab model, tab strip, `TabManager` owns the environment |
 | [`0003`](docs/commits/0003-live-budget.md) | Live-tab budget + score-based eviction. **Thesis validated** |
+| [`0004`](docs/commits/0004-snapshot-hibernation.md) | Screenshot-backed hibernation; teardown on by default |
 
-### Measured (commit `0003`)
+### Measured (commit `0004`)
 
-Eight real sites, every tab activated so the budget binds. Working set summed over the WebView2
-process tree, filtered to Hearth's own profile:
+Eight real sites, every tab activated so the budget binds. One build, 95 s settle, only the
+teardown flag varying. Working set summed over the WebView2 process tree, filtered to Hearth's
+own profile:
 
 | Configuration | Renderers | Total | Reduction |
 | --- | ---: | ---: | ---: |
-| budget=8 (no eviction) | 21 | 1823 MB | — |
-| budget=3, `TrySuspend` | 10 | 1188 MB | **−35%** |
-| budget=3, full teardown | 5 | 854 MB | **−53%** |
-| budget=1, full teardown | 2 | 628 MB | **−66%** |
+| budget=8 (no eviction) | 22 | 2234 MB | — |
+| budget=3, `TrySuspend` | 15 | 1520 MB | **−32%** |
+| budget=3, full teardown | 8 | 1150 MB | **−49%** |
+| budget=1, full teardown | 2 | 625 MB | **−72%** |
+
+Snapshots cost **26.8 KB** each on average against roughly **230 MB** per live tab — a real
+RAM-for-disk trade near **8,000:1**, some forty times better than the 200:1 originally predicted.
+A thousand hibernated tabs would occupy about 27 MB.
 
 And with the budget fixed at 3, varying only how many tabs are open:
 
