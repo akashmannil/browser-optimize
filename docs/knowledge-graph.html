@@ -364,7 +364,7 @@
 
 <script>
 const DATA = {
-  rev: "0005",
+  rev: "0006",
   nodeTypes: {
     problem:"An observed problem the project exists to solve",
     concept:"A mental model used to reason about the system",
@@ -423,6 +423,11 @@ const DATA = {
     {id:"commit.0004",type:"commit",label:"0004 — screenshot-backed hibernation",summary:"Snapshot capture at blur, scroll replay on restore, placeholder painting during rebuild, and teardown enabled by default gated on holding a snapshot. Also corrected the measurement harness and re-measured — 0003's figures were sampled before runs had settled.",doc:"docs/commits/0004-snapshot-hibernation.md"},
     {id:"d.content-blocking-is-the-indirect-lever",type:"decision",label:"Control renderer count through content, not the process model",summary:"Since no process-model API is available, low-power mode refuses cross-origin subframe documents and media at the WebResourceRequested filter instead. Renderer count is downstream of what a page is allowed to load, so declining the fan-out sources achieves the cap directly.",rationale:"Measured on one tab of stackoverflow.com — normal: 14 renderers / 1356 MB. Low power with blocking: 1 renderer / 301 MB (−78%). Low power with blocking DISABLED: 14 renderers / 1243 MB. That third run is the control: it isolates the win to frame blocking, not the tighter budget, which with a single tab never binds.",revisit_if:"WebView2 ever exposes real process pooling, at which point capping directly would beat breaking pages."},
     {id:"k.frame-blocking-breaks-pages",type:"constraint",label:"Blocking cross-origin frames breaks real functionality",summary:"Refusing cross-origin subframes removes embedded video, OAuth and SSO login flows, comment widgets, payment frames, CAPTCHAs and map embeds. Some of these are the only route through a page.",discovered_in:"0005",implication:"This is why it is a MODE and never a silent default. A page that fails to log in with no explanation is worse than the memory it saves.",future:"A per-site allowlist would pass login and payment frames while still refusing ad and analytics frames — most of the win, much less breakage."},
+    {id:"k.wpf-airspace",type:"constraint",label:"WebView2 paints above all WPF content, regardless of Z-order",summary:"The WPF WebView2 is a windowed HWND control hosted through HwndHost. Windows composites it above the WPF render surface, so Panel.ZIndex, overlays and adorners have no effect against it.",discovered_in:"0006",implication:"Any full-window UI must COLLAPSE the WebView2 host rather than stack above it. There is no Z-order fix. Discovered when the Big Picture overlay was built correctly and rendered completely invisible behind a live page.",future:"For Big Picture this is not a workaround but the honest design — the mode shows a wall of pictures, so no live page needs to be on screen."},
+    {id:"k.capture-needs-first-paint",type:"constraint",label:"A tab blurred before first paint photographs blank",summary:"CapturePreviewAsync succeeds on a realised-but-unpainted WebView2 and returns a blank frame. ActivateAsync returns once the renderer exists, not once the document has loaded, so a fast tab switch captures nothing useful.",discovered_in:"0006",implication:"Capture is gated on BrowserTab.HasRendered, set from a successful NavigationCompleted and cleared on teardown. A refused capture also correctly withholds permission to tear the tab down. A blank thumbnail reads as a broken page rather than an unvisited one, which is worse than no thumbnail.",known_lever:"This also invalidated the HEARTH_ACTIVATE_ALL benchmark, which switched tabs faster than any page could load. It now dwells until each tab has painted — a harness that switches instantly measures a workload nobody has."},
+    {id:"d.bigpicture-is-budget-one",type:"decision",label:"Big Picture pins the live budget to one",summary:"Entering the full-screen tab wall forces EffectiveBudget to 1. You are looking at a wall of pictures, so exactly one page needs to be real.",rationale:"The lean-back aesthetic and the memory architecture want the same thing, which is why the mode is worth having rather than being a skin. Steam Big Picture shows one game at a time; Hearth shows one page, with everything else as the screenshots hibernation was already producing.",revisit_if:"The snapshots that make tabs cheap are the same artifacts that make them findable — the overview costs nothing extra because eviction already paid for it."},
+    {id:"cmp.snapshotconverter",type:"component",label:"SnapshotConverter",file:"src/Hearth/Views/SnapshotConverter.cs",summary:"Loads tab snapshots for the Big Picture wall, decoding at 480px wide. Paths carry a '?t=ticks' suffix so bindings invalidate on re-capture, since the file path alone is stable and would never signal a change.",rationale:"Decoding full-resolution page captures for dozens of thumbnails would spend more memory on the tab overview than on the tabs — an absurd way to lose the argument."},
+    {id:"commit.0006",type:"commit",label:"0006 — Big Picture mode",summary:"Full-screen, keyboard-driven wall of tab snapshots with the live budget pinned to one. Discovered the WPF airspace constraint and the blank-capture-before-first-paint bug.",doc:"docs/commits/0006-big-picture.md"},
     {id:"cmp.memoryprobe",type:"component",label:"MemoryProbe",file:"src/Hearth/Core/MemoryProbe.cs",summary:"Samples the working set of Hearth's own process tree via a Toolhelp32 snapshot, walking descendants of the current PID. Makes the taskbar readout a measured figure rather than an estimate.",rationale:"Walks descendants rather than filtering every msedgewebview2.exe on the machine, because Windows runs other WebView2 apps whose memory is not ours to report.",invariant:"Never display a memory number this process has not actually observed."},
     {id:"commit.0005",type:"commit",label:"0005 — taskbar and low-power mode",summary:"Replaced the developer status strip with a real taskbar: navigation, a measured memory readout in plain language, and a low-power toggle that cuts stackoverflow.com from 14 renderers to 1.",doc:"docs/commits/0005-taskbar-low-power.md"},
     {id:"cmp.snapshotstore",type:"component",label:"SnapshotStore",file:"src/Hearth/Core/SnapshotStore.cs",summary:"Captures and persists a tab's last painted frame plus its scroll offset, and replays the offset on rehydrate. What makes teardown survivable: an evicted tab renders its own last frame rather than going blank.",invariant:"Capture only ever happens at blur, on the outgoing tab, before any visibility change. Never write the capture stream straight to a file — buffer it and check for non-zero length first."}
@@ -509,7 +514,21 @@ const DATA = {
     ["cmp.mainwindow","depends_on","cmp.memoryprobe"],
     ["cmp.memoryprobe","introduced_in","commit.0005"],
     ["d.content-blocking-is-the-indirect-lever","introduced_in","commit.0005"],
-    ["k.frame-blocking-breaks-pages","introduced_in","commit.0005"]
+    ["k.frame-blocking-breaks-pages","introduced_in","commit.0005"],
+    ["k.wpf-airspace","constrains","d.dotnet-wpf"],
+    ["k.wpf-airspace","constrains","d.bigpicture-is-budget-one"],
+    ["k.capture-needs-first-paint","constrains","cmp.snapshotstore"],
+    ["k.capture-needs-first-paint","motivated_by","k.capture-requires-live"],
+    ["d.bigpicture-is-budget-one","implements","c.hibernate-by-default"],
+    ["d.bigpicture-is-budget-one","depends_on","cmp.snapshotstore"],
+    ["d.bigpicture-is-budget-one","motivated_by","p.archive-blackhole"],
+    ["cmp.snapshotconverter","implements","d.bigpicture-is-budget-one"],
+    ["cmp.snapshotconverter","depends_on","cmp.snapshotstore"],
+    ["cmp.mainwindow","implements","d.bigpicture-is-budget-one"],
+    ["k.wpf-airspace","introduced_in","commit.0006"],
+    ["k.capture-needs-first-paint","introduced_in","commit.0006"],
+    ["d.bigpicture-is-budget-one","introduced_in","commit.0006"],
+    ["cmp.snapshotconverter","introduced_in","commit.0006"]
   ]
 };
 

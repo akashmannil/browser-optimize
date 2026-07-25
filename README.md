@@ -37,6 +37,19 @@ Early. Built commit by commit, each with a design note in [`docs/commits/`](docs
 | [`0003`](docs/commits/0003-live-budget.md) | Live-tab budget + score-based eviction. **Thesis validated** |
 | [`0004`](docs/commits/0004-snapshot-hibernation.md) | Screenshot-backed hibernation; teardown on by default |
 | [`0005`](docs/commits/0005-taskbar-low-power.md) | Taskbar, measured memory readout, low-power mode |
+| [`0006`](docs/commits/0006-big-picture.md) | Big Picture — full-screen tab wall, live budget pinned to 1 |
+
+### Modes
+
+**Low power** — tightens the budget and refuses cross-origin subframes and media. Cuts a
+stackoverflow.com tab from 14 renderers to 1. Breaks embedded video, OAuth logins and payment
+frames, which is why it is an explicit toggle and never a silent default.
+
+**Big Picture** (`F11`) — a full-screen, keyboard-driven wall of every tab, built from the
+screenshots hibernation already produces. Entering it pins the live budget to **1**: you are
+looking at pictures, so exactly one page needs to be real. The lean-back interface and the memory
+architecture happen to want the same thing, which is the reason the mode exists rather than being
+a skin.
 
 ### Low-power mode (commit `0005`)
 

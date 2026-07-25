@@ -11,6 +11,7 @@
         <SolidColorBrush x:Key="ChromeField"      Color="#2B2D31" />
 
         <views:StateToBrushConverter x:Key="StateToBrush" />
+        <views:SnapshotConverter x:Key="Snapshot" />
 
         <!-- Toolbar button: square hit target, no chrome until hovered. Disabled
              state matters here — back/forward are dead most of the time and

@@ -65,6 +65,15 @@ public partial class MainWindow : Window
             {
                 var tab = _tabs.Open(url, activate: false);
                 await _tabs.ActivateAsync(tab);
+
+                // Dwell until the page has actually painted. ActivateAsync
+                // returns once the renderer exists, not once the document has
+                // loaded, so advancing immediately would blur every tab before
+                // its first paint — producing no snapshots and, in turn, no
+                // teardowns. A person reads a page before moving on; a harness
+                // that doesn't is measuring a workload nobody has.
+                for (var waited = 0; waited < 80 && !tab.HasRendered; waited++)
+                    await Task.Delay(100);
             }
         }
         else
@@ -157,6 +166,85 @@ public partial class MainWindow : Window
         if (_tabs is null) return;
         await _tabs.SetLowPowerAsync(LowPowerToggle.IsChecked == true);
         Sync();
+    }
+
+    // ── Big Picture ──────────────────────────────────────────────────────────
+
+    private void BigPicture_Click(object sender, RoutedEventArgs e) =>
+        _ = SetBigPictureAsync(BigPicture.Visibility != Visibility.Visible);
+
+    private async Task SetBigPictureAsync(bool on)
+    {
+        if (_tabs is null) return;
+
+        await _tabs.SetBigPictureAsync(on);
+
+        BigPicture.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
+
+        // WPF airspace: WebView2 is a windowed HWND control hosted through
+        // HwndHost, so it paints above ALL WPF content regardless of Z-order.
+        // An overlay cannot be stacked on top of it — the web content has to be
+        // taken off screen instead. This is also the honest thing to do here:
+        // Big Picture shows pictures, so no live page needs to be visible.
+        ContentHost.Visibility = on ? Visibility.Collapsed : Visibility.Visible;
+        if (on) HidePlaceholder();
+
+        if (on)
+        {
+            TabWall.ItemsSource = _tabs.Tabs;
+            TabWall.SelectedItem = _tabs.Active;
+            BigPictureSubtitle.Text =
+                $"{_tabs.Tabs.Count} tabs · one stays awake while you're here";
+
+            // Focus the wall so arrow keys work without a click first — the
+            // whole point of this mode is that it is driven from a distance.
+            TabWall.Focus();
+            if (TabWall.SelectedItem is not null)
+                TabWall.ScrollIntoView(TabWall.SelectedItem);
+        }
+        else
+        {
+            AddressBar.Focus();
+        }
+
+        Sync();
+    }
+
+    private async void TabWall_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key is not (Key.Enter or Key.Space)) return;
+        e.Handled = true;
+        await OpenSelectedAsync();
+    }
+
+    private async void TabWall_Open(object sender, MouseButtonEventArgs e) =>
+        await OpenSelectedAsync();
+
+    private async Task OpenSelectedAsync()
+    {
+        if (_tabs is null || TabWall.SelectedItem is not BrowserTab tab) return;
+        await _tabs.ActivateAsync(tab);
+        await SetBigPictureAsync(false);
+    }
+
+    private async void Window_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        var showing = BigPicture.Visibility == Visibility.Visible;
+
+        switch (e.Key)
+        {
+            case Key.F11:
+                e.Handled = true;
+                await SetBigPictureAsync(!showing);
+                break;
+
+            // Escape only means "go back" while the wall is up; elsewhere it
+            // belongs to the page.
+            case Key.Escape when showing:
+                e.Handled = true;
+                await SetBigPictureAsync(false);
+                break;
+        }
     }
 
 

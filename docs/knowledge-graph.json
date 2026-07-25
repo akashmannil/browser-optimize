@@ -2,7 +2,7 @@
   "project": "hearth",
   "description": "A low-resource Windows browser shell built on WebView2, whose core bet is that hibernated is a tab's default state and live is a budgeted exception.",
   "schema_version": "1.0",
-  "graph_updated_at_commit": "0005",
+  "graph_updated_at_commit": "0006",
   "consumer_notes": "This file is the authoritative machine-readable model of WHY this codebase is shaped the way it is. Source code records what the system does; this graph records the reasoning, the rejected alternatives, and the constraints that must not be violated. Agents should read this before proposing architectural changes. Every node has a stable `id` that is safe to reference in commits, issues, and other documents. When you add a feature, add its nodes/edges here in the same commit.",
 
   "node_types": {
@@ -344,6 +344,48 @@
       "doc": "docs/commits/0003-live-budget.md"
     },
     {
+      "id": "k.wpf-airspace",
+      "type": "constraint",
+      "label": "WebView2 paints above all WPF content, regardless of Z-order",
+      "summary": "The WPF WebView2 is a windowed HWND control hosted through HwndHost. Windows composites it above the WPF render surface, so Panel.ZIndex, overlays and adorners have no effect against it. Discovered at 0006: the Big Picture overlay was correctly built and completely invisible behind a live page.",
+      "discovered_in": "0006",
+      "implication": "Any full-window UI in this app must COLLAPSE the WebView2 host rather than stack above it. There is no Z-order fix.",
+      "silver_lining": "For Big Picture this is not a workaround but the honest design: the mode shows a wall of pictures, so no live page needs to be on screen at all."
+    },
+    {
+      "id": "k.capture-needs-first-paint",
+      "type": "constraint",
+      "label": "A tab blurred before first paint photographs blank",
+      "summary": "CapturePreviewAsync succeeds on a realised-but-unpainted WebView2 and returns a blank frame. ActivateAsync returns once the renderer exists, not once the document has loaded, so a fast tab switch captures nothing useful.",
+      "discovered_in": "0006",
+      "implication": "Capture is gated on BrowserTab.HasRendered, set from a successful NavigationCompleted and cleared on teardown. A refused capture correctly also withholds permission to tear the tab down, since there would be nothing to repaint from.",
+      "why_it_matters": "A blank thumbnail reads as a broken page rather than an unvisited one, which is worse than showing no thumbnail at all.",
+      "harness_note": "This also invalidated the HEARTH_ACTIVATE_ALL benchmark, which switched tabs faster than any page could load. It now dwells until each tab has painted -- a harness that switches instantly measures a workload nobody has."
+    },
+    {
+      "id": "d.bigpicture-is-budget-one",
+      "type": "decision",
+      "label": "Big Picture pins the live budget to one",
+      "summary": "Entering the full-screen tab wall forces EffectiveBudget to 1. You are looking at a wall of pictures, so exactly one page needs to be real.",
+      "rationale": "The lean-back aesthetic and the memory architecture want the same thing here, which is the reason the mode is worth having rather than being a skin. Steam Big Picture shows one game at a time; Hearth shows one page, with everything else as the screenshots hibernation was already producing.",
+      "synergy": "The snapshots that make tabs cheap are the same artifacts that make them findable. The overview costs nothing extra because eviction already paid for it."
+    },
+    {
+      "id": "cmp.snapshotconverter",
+      "type": "component",
+      "label": "SnapshotConverter",
+      "file": "src/Hearth/Views/SnapshotConverter.cs",
+      "summary": "Loads tab snapshots for the Big Picture wall, decoding at 480px wide. Paths carry a '?t=ticks' suffix so bindings invalidate on re-capture, since the file path alone is stable and would never signal a change.",
+      "rationale": "Decoding full-resolution page captures for dozens of thumbnails would spend more memory on the tab overview than on the tabs, which would be an absurd way to lose the argument."
+    },
+    {
+      "id": "commit.0006",
+      "type": "commit",
+      "label": "0006 - Big Picture mode",
+      "summary": "Full-screen, keyboard-driven wall of tab snapshots with the live budget pinned to one. Discovered the WPF airspace constraint and the blank-capture-before-first-paint bug.",
+      "doc": "docs/commits/0006-big-picture.md"
+    },
+    {
       "id": "cmp.memoryprobe",
       "type": "component",
       "label": "MemoryProbe",
@@ -491,8 +533,25 @@
 
     { "from": "cmp.memoryprobe",   "rel": "introduced_in", "to": "commit.0005" },
     { "from": "d.content-blocking-is-the-indirect-lever", "rel": "introduced_in", "to": "commit.0005" },
-    { "from": "k.frame-blocking-breaks-pages",            "rel": "introduced_in", "to": "commit.0005" }
+    { "from": "k.frame-blocking-breaks-pages",            "rel": "introduced_in", "to": "commit.0005" },
+
+    { "from": "k.wpf-airspace",             "rel": "constrains",   "to": "d.dotnet-wpf",              "note": "A cost of the WPF host that WinUI 3 would not have imposed in the same way." },
+    { "from": "k.wpf-airspace",             "rel": "constrains",   "to": "d.bigpicture-is-budget-one" },
+    { "from": "k.capture-needs-first-paint","rel": "constrains",   "to": "cmp.snapshotstore" },
+    { "from": "k.capture-needs-first-paint","rel": "motivated_by", "to": "k.capture-requires-live" },
+    { "from": "d.bigpicture-is-budget-one", "rel": "implements",   "to": "c.hibernate-by-default" },
+    { "from": "d.bigpicture-is-budget-one", "rel": "depends_on",   "to": "cmp.snapshotstore",         "note": "The wall is built from the screenshots eviction already paid for." },
+    { "from": "d.bigpicture-is-budget-one", "rel": "motivated_by", "to": "p.archive-blackhole",       "note": "A visual wall is the answer to archives nobody revisits." },
+    { "from": "cmp.snapshotconverter",      "rel": "implements",   "to": "d.bigpicture-is-budget-one" },
+    { "from": "cmp.snapshotconverter",      "rel": "depends_on",   "to": "cmp.snapshotstore" },
+    { "from": "cmp.mainwindow",             "rel": "implements",   "to": "d.bigpicture-is-budget-one" },
+
+    { "from": "k.wpf-airspace",             "rel": "introduced_in", "to": "commit.0006" },
+    { "from": "k.capture-needs-first-paint","rel": "introduced_in", "to": "commit.0006" },
+    { "from": "d.bigpicture-is-budget-one", "rel": "introduced_in", "to": "commit.0006" },
+    { "from": "cmp.snapshotconverter",      "rel": "introduced_in", "to": "commit.0006" }
   ]
 }
+
 
 

@@ -18,6 +18,7 @@ public sealed class BrowserTab : INotifyPropertyChanged
     private string _url;
     private TabState _state = TabState.Cold;
     private WebView2? _view;
+    private string? _snapshotPath;
 
     public BrowserTab(string url)
     {
@@ -42,6 +43,17 @@ public sealed class BrowserTab : INotifyPropertyChanged
     /// survive eviction pressure longer (c.tab-taxonomy).
     /// </summary>
     public int ActivationCount { get; internal set; }
+
+    /// <summary>
+    /// Whether this tab has completed a navigation since being realised, and so
+    /// has something on screen worth photographing.
+    ///
+    /// Without this guard a tab blurred before its first paint is captured
+    /// blank, and a blank thumbnail is worse than none: it looks like a broken
+    /// page rather than an unvisited one. Reset on teardown, because a rebuilt
+    /// tab has not painted again yet.
+    /// </summary>
+    public bool HasRendered { get; internal set; }
 
     public string Url
     {
@@ -79,6 +91,25 @@ public sealed class BrowserTab : INotifyPropertyChanged
     /// <summary>Host for the tab's short display label in the strip.</summary>
     public string DisplayLabel => Title.Length <= 24 ? Title : Title[..23] + "…";
 
+    /// <summary>
+    /// Path to this tab's most recent screenshot, or null if it has never been
+    /// blurred while live. Set by <see cref="SnapshotStore"/>; exposed on the tab
+    /// so views can bind to it directly rather than querying the store per frame.
+    /// </summary>
+    public string? SnapshotPath
+    {
+        get => _snapshotPath;
+        internal set => Set(ref _snapshotPath, value);
+    }
+
+    /// <summary>Host name only — what a person actually uses to recognise a page.</summary>
+    public string HostLabel =>
+        Uri.TryCreate(Url, UriKind.Absolute, out var uri)
+            ? uri.Host.StartsWith("www.", StringComparison.OrdinalIgnoreCase)
+                ? uri.Host[4..]
+                : uri.Host
+            : Url;
+
     public event PropertyChangedEventHandler? PropertyChanged;
 
     private bool Set<T>(ref T field, T value, [CallerMemberName] string? name = null)
@@ -87,6 +118,7 @@ public sealed class BrowserTab : INotifyPropertyChanged
         field = value;
         OnPropertyChanged(name);
         if (name is nameof(Title)) OnPropertyChanged(nameof(DisplayLabel));
+        if (name is nameof(Url)) OnPropertyChanged(nameof(HostLabel));
         return true;
     }
 

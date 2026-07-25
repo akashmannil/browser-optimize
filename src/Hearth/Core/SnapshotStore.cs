@@ -53,6 +53,12 @@ public sealed class SnapshotStore
     {
         if (tab.View?.CoreWebView2 is not { } core) return false;
 
+        // A tab blurred before its first paint photographs as a blank frame, and
+        // a blank thumbnail reads as a broken page rather than an unvisited one.
+        // Refusing the capture leaves the card showing its host name, which is
+        // honest. It also correctly withholds permission to tear the tab down.
+        if (!tab.HasRendered) return false;
+
         try
         {
             var scroll = await ReadScrollAsync(core);
@@ -75,6 +81,10 @@ public sealed class SnapshotStore
                 ScrollY = scroll.y,
                 CapturedUtc = DateTime.UtcNow
             };
+
+            // Stamped with the capture time so bindings see a changed value and
+            // reload the file; the path alone is stable and would not invalidate.
+            tab.SnapshotPath = $"{path}?t={DateTime.UtcNow.Ticks}";
             return true;
         }
         catch (Exception ex)

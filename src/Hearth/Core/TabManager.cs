@@ -70,8 +70,39 @@ public sealed class TabManager
     /// <summary>Whether low-power mode is engaged.</summary>
     public bool LowPower { get; private set; }
 
-    /// <summary>The budget actually in force, which low-power mode tightens.</summary>
-    public int EffectiveBudget => LowPower ? _options.LowPowerBudget : _options.LiveTabBudget;
+    /// <summary>Whether the full-screen tab wall is showing.</summary>
+    public bool BigPicture { get; private set; }
+
+    /// <summary>
+    /// The budget actually in force. Big Picture pins it to one: you are looking
+    /// at a wall of pictures, so exactly one page needs to be real. The lean-back
+    /// aesthetic and the memory architecture want the same thing here, which is
+    /// the reason this mode is worth having at all rather than being a skin.
+    /// </summary>
+    public int EffectiveBudget => BigPicture
+        ? 1
+        : LowPower ? _options.LowPowerBudget : _options.LiveTabBudget;
+
+    /// <summary>
+    /// Enters or leaves Big Picture. On entry the active tab is captured first,
+    /// so the wall shows what the user was actually last looking at rather than a
+    /// stale frame from whenever it was last blurred.
+    /// </summary>
+    public async Task SetBigPictureAsync(bool on)
+    {
+        if (BigPicture == on) return;
+
+        if (on && Active is { } current && current.View?.CoreWebView2 is not null)
+            await Snapshots.CaptureAsync(current);
+
+        BigPicture = on;
+
+        await _budgetGate.WaitAsync();
+        try { await EnforceBudgetAsync(); }
+        finally { _budgetGate.Release(); }
+
+        Changed?.Invoke(this, EventArgs.Empty);
+    }
 
     /// <summary>
     /// Engages or releases low-power mode. Content filtering only affects
@@ -336,7 +367,11 @@ public sealed class TabManager
         // offset as soon as the document is ready.
         core.NavigationCompleted += async (_, e) =>
         {
-            if (e.IsSuccess) await Snapshots.RestoreScrollAsync(tab);
+            if (e.IsSuccess)
+            {
+                tab.HasRendered = true;
+                await Snapshots.RestoreScrollAsync(tab);
+            }
             Changed?.Invoke(this, EventArgs.Empty);
         };
 
@@ -380,5 +415,9 @@ public sealed class TabManager
         tab.View.Dispose();
         tab.View = null;
         tab.State = TabState.Cold;
+
+        // A rebuilt tab has not painted again yet, so it is not photographable
+        // until its next navigation completes.
+        tab.HasRendered = false;
     }
 }
