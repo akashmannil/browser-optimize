@@ -38,6 +38,7 @@ Early. Built commit by commit, each with a design note in [`docs/commits/`](docs
 | [`0004`](docs/commits/0004-snapshot-hibernation.md) | Screenshot-backed hibernation; teardown on by default |
 | [`0005`](docs/commits/0005-taskbar-low-power.md) | Taskbar, measured memory readout, low-power mode |
 | [`0006`](docs/commits/0006-big-picture.md) | Big Picture — full-screen tab wall, live budget pinned to 1 |
+| [`0007`](docs/commits/0007-ui-overhaul.md) | UI overhaul — custom chrome, light/dark theming, motion |
 
 ### Modes
 
@@ -49,7 +50,18 @@ frames, which is why it is an explicit toggle and never a silent default.
 screenshots hibernation already produces. Entering it pins the live budget to **1**: you are
 looking at pictures, so exactly one page needs to be real. The lean-back interface and the memory
 architecture happen to want the same thing, which is the reason the mode exists rather than being
-a skin.
+a skin. Leaving it puts every other tab straight to sleep, rather than waiting for pressure.
+
+## Interface
+
+There is no native title bar — the tab strip *is* the caption, with window controls at its right
+edge. Light and dark are fully tokenised and follow Windows by default; the toolbar button cycles
+System → Light → Dark. Neutrals are Apple's system greys, with the ember accent darkened in light
+mode because ember on white fails contrast.
+
+```powershell
+HEARTH_THEME=light   # or dark, or unset to follow Windows
+```
 
 ### Low-power mode (commit `0005`)
 

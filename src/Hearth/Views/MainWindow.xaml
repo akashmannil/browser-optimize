@@ -1,51 +1,30 @@
 <Window x:Class="Hearth.Views.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:local="clr-namespace:Hearth.Views"
-        Title="Hearth" Height="820" Width="1280"
-        Background="{StaticResource ChromeBackground}"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        Title="Hearth" Height="860" Width="1320"
+        MinHeight="480" MinWidth="720"
+        WindowStyle="None"
+        AllowsTransparency="False"
+        Background="{DynamicResource Bg}"
+        UseLayoutRounding="True"
+        TextOptions.TextFormattingMode="Ideal"
+        TextOptions.TextRenderingMode="ClearType"
         PreviewKeyDown="Window_PreviewKeyDown">
 
-    <Window.Resources>
-        <!-- A tab chip. The state pip on the left is deliberately always visible:
-             users are meant to SEE which tabs hold a renderer, because the whole
-             product thesis is that this cost is normally invisible (p.invisible-cost). -->
-        <DataTemplate x:Key="TabChipTemplate">
-            <Border x:Name="Chip"
-                    Background="{StaticResource ChromeField}"
-                    CornerRadius="6"
-                    Margin="0,0,4,0"
-                    Padding="8,5">
-                <StackPanel Orientation="Horizontal">
-                    <Ellipse Width="7" Height="7"
-                             Margin="0,0,7,0"
-                             VerticalAlignment="Center"
-                             Fill="{Binding State, Converter={StaticResource StateToBrush}}"
-                             ToolTip="{Binding State}" />
+    <!-- Custom chrome: the native caption is gone and the tab bar IS the title
+         bar, the way every modern browser does it. CaptionHeight makes that
+         strip draggable; anything interactive inside it needs
+         WindowChrome.IsHitTestVisibleInChrome, which the shared styles set. -->
+    <shell:WindowChrome.WindowChrome>
+        <shell:WindowChrome CaptionHeight="42"
+                            ResizeBorderThickness="6"
+                            CornerRadius="0"
+                            GlassFrameThickness="0"
+                            UseAeroCaptionButtons="False" />
+    </shell:WindowChrome.WindowChrome>
 
-                    <TextBlock Text="{Binding DisplayLabel}"
-                               Foreground="{StaticResource ChromeForeground}"
-                               FontSize="12"
-                               VerticalAlignment="Center"
-                               MaxWidth="150"
-                               TextTrimming="CharacterEllipsis" />
-
-                    <Button Content="✕"
-                            Margin="8,0,0,0"
-                            Padding="3,0"
-                            FontSize="10"
-                            BorderThickness="0"
-                            Background="Transparent"
-                            Foreground="{StaticResource ChromeMuted}"
-                            Cursor="Hand"
-                            Tag="{Binding}"
-                            Click="CloseTab_Click" />
-                </StackPanel>
-            </Border>
-        </DataTemplate>
-    </Window.Resources>
-
-    <Grid>
+    <Grid x:Name="Root">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
@@ -53,96 +32,120 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <!-- Tab strip -->
-        <Grid Grid.Row="0" Margin="8,8,8,0">
+        <!-- ── Row 0 · tab bar, doubling as the title bar ───────────────── -->
+        <Grid x:Name="TitleBar" Grid.Row="0" Background="{DynamicResource Bg}" Height="42">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
-            <ScrollViewer Grid.Column="0"
-                          HorizontalScrollBarVisibility="Auto"
-                          VerticalScrollBarVisibility="Disabled">
-                <ItemsControl x:Name="TabStrip"
-                              ItemTemplate="{StaticResource TabChipTemplate}"
-                              PreviewMouseLeftButtonUp="TabStrip_Click">
-                    <ItemsControl.ItemsPanel>
-                        <ItemsPanelTemplate>
-                            <StackPanel Orientation="Horizontal" />
-                        </ItemsPanelTemplate>
-                    </ItemsControl.ItemsPanel>
-                </ItemsControl>
+            <ScrollViewer Grid.Column="0" Margin="8,0,0,0"
+                          HorizontalScrollBarVisibility="Hidden"
+                          VerticalScrollBarVisibility="Disabled"
+                          VerticalAlignment="Center">
+                <StackPanel Orientation="Horizontal">
+                    <ListBox x:Name="TabStrip"
+                             Background="Transparent"
+                             BorderThickness="0"
+                             ItemContainerStyle="{StaticResource TabChip}"
+                             SelectionChanged="TabStrip_SelectionChanged"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             ScrollViewer.VerticalScrollBarVisibility="Disabled">
+                        <ListBox.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel Orientation="Horizontal" />
+                            </ItemsPanelTemplate>
+                        </ListBox.ItemsPanel>
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal">
+                                    <Ellipse Width="6" Height="6" Margin="0,0,8,0"
+                                             VerticalAlignment="Center"
+                                             Fill="{Binding State, Converter={StaticResource StateToBrush}}"
+                                             ToolTip="{Binding State}" />
+                                    <TextBlock Text="{Binding DisplayLabel}"
+                                               Foreground="{DynamicResource TextPrimary}"
+                                               FontFamily="{StaticResource Body}"
+                                               FontSize="{StaticResource TextSM}"
+                                               VerticalAlignment="Center"
+                                               MaxWidth="164"
+                                               TextTrimming="CharacterEllipsis" />
+                                    <Button Content="&#xE711;"
+                                            Style="{StaticResource IconButton}"
+                                            Width="18" Height="18" FontSize="9"
+                                            Margin="9,0,-2,0"
+                                            Tag="{Binding}"
+                                            Click="CloseTab_Click" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+
+                    <Button Style="{StaticResource IconButton}"
+                            Content="&#xE710;" FontSize="11"
+                            Margin="4,0,0,0"
+                            ToolTip="New tab"
+                            Click="NewTab_Click" />
+                </StackPanel>
             </ScrollViewer>
 
-            <Button Grid.Column="1"
-                    Content="+"
-                    Padding="12,3"
-                    FontSize="15"
-                    BorderThickness="0"
-                    Background="{StaticResource ChromeField}"
-                    Foreground="{StaticResource ChromeForeground}"
-                    Cursor="Hand"
-                    Click="NewTab_Click" />
+            <StackPanel Grid.Column="1" Orientation="Horizontal"
+                        VerticalAlignment="Center" Margin="10,0,8,0">
+                <ToggleButton x:Name="LowPowerToggle"
+                              Style="{StaticResource PillToggle}"
+                              Content="Low power"
+                              ToolTip="Fewer pages awake, and third-party embeds are skipped"
+                              Checked="LowPower_Changed" Unchecked="LowPower_Changed" />
+                <Button x:Name="BigPictureButton"
+                        Style="{StaticResource IconButton}"
+                        Content="&#xE71B;" FontSize="13"
+                        Margin="4,0,0,0"
+                        ToolTip="All tabs  ·  F11"
+                        Click="BigPicture_Click" />
+                <Button x:Name="ThemeButton"
+                        Style="{StaticResource IconButton}"
+                        Content="&#xE706;" FontSize="13"
+                        ToolTip="Theme"
+                        Click="Theme_Click" />
+            </StackPanel>
+
+            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Top">
+                <Button Style="{StaticResource CaptionButton}" Content="&#xE921;"
+                        ToolTip="Minimise" Click="Minimise_Click" />
+                <Button x:Name="MaxButton" Style="{StaticResource CaptionButton}" Content="&#xE922;"
+                        ToolTip="Maximise" Click="Maximise_Click" />
+                <Button Style="{StaticResource CloseButton}" Content="&#xE8BB;"
+                        ToolTip="Close" Click="Close_Click" />
+            </StackPanel>
         </Grid>
 
-        <!-- Taskbar -->
-        <Grid Grid.Row="1" Margin="8,4,8,8">
+        <!-- ── Row 1 · navigation and address ──────────────────────────── -->
+        <Grid x:Name="NavBar" Grid.Row="1" Margin="10,2,10,10">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
-            <StackPanel Grid.Column="0" Orientation="Horizontal" Margin="0,0,6,0">
-                <Button x:Name="BackButton"    Style="{StaticResource ToolButton}"
-                        Content="&#xE72B;" FontFamily="Segoe MDL2 Assets" FontSize="12"
-                        ToolTip="Back"    Click="Back_Click" />
-                <Button x:Name="ForwardButton" Style="{StaticResource ToolButton}"
-                        Content="&#xE72A;" FontFamily="Segoe MDL2 Assets" FontSize="12"
-                        ToolTip="Forward" Click="Forward_Click" />
-                <Button x:Name="ReloadButton"  Style="{StaticResource ToolButton}"
-                        Content="&#xE72C;" FontFamily="Segoe MDL2 Assets" FontSize="12"
-                        ToolTip="Reload"  Click="Reload_Click" />
-                <Button x:Name="HomeButton"    Style="{StaticResource ToolButton}"
-                        Content="&#xE80F;" FontFamily="Segoe MDL2 Assets" FontSize="12"
-                        ToolTip="Home"    Click="Home_Click" />
+            <StackPanel Grid.Column="0" Orientation="Horizontal" Margin="0,0,8,0">
+                <Button x:Name="BackButton" Style="{StaticResource IconButton}"
+                        Content="&#xE72B;" ToolTip="Back" Click="Back_Click" />
+                <Button x:Name="ForwardButton" Style="{StaticResource IconButton}"
+                        Content="&#xE72A;" ToolTip="Forward" Click="Forward_Click" />
+                <Button x:Name="ReloadButton" Style="{StaticResource IconButton}"
+                        Content="&#xE72C;" ToolTip="Reload" Click="Reload_Click" />
+                <Button x:Name="HomeButton" Style="{StaticResource IconButton}"
+                        Content="&#xE80F;" ToolTip="Home" Click="Home_Click" />
             </StackPanel>
 
-            <TextBox x:Name="AddressBar"
-                     Grid.Column="1"
-                     Background="{StaticResource ChromeField}"
-                     Foreground="{StaticResource ChromeForeground}"
-                     CaretBrush="{StaticResource ChromeForeground}"
-                     BorderThickness="0"
-                     Padding="12,7"
-                     FontSize="13"
-                     VerticalContentAlignment="Center"
+            <TextBox x:Name="AddressBar" Grid.Column="1"
+                     Style="{StaticResource AddressField}"
                      KeyDown="AddressBar_KeyDown" />
-
-            <StackPanel Grid.Column="2" Orientation="Horizontal" Margin="6,0,0,0">
-                <ToggleButton x:Name="LowPowerToggle"
-                              Style="{StaticResource ModeToggle}"
-                              Content="Low power"
-                              ToolTip="Keep fewer pages awake and skip third-party embeds"
-                              Checked="LowPower_Changed" Unchecked="LowPower_Changed" />
-                <Button x:Name="BigPictureButton"
-                        Style="{StaticResource ToolButton}" Width="Auto" Padding="11,5"
-                        FontSize="11" Foreground="{StaticResource ChromeMuted}"
-                        Content="All tabs"
-                        ToolTip="Full-screen view of every tab (F11)"
-                        Click="BigPicture_Click" />
-            </StackPanel>
         </Grid>
 
-        <!-- Content host: every realised WebView2 lives here, only the active one
-             is Visible. Collapsed is not merely cosmetic — an invisible controller
-             is a precondition for TrySuspend(). -->
+        <!-- ── Row 2 · web content ─────────────────────────────────────── -->
         <Grid Grid.Row="2">
             <Grid x:Name="ContentHost" />
-
-            <!-- The evicted tab's own last frame, painted while its renderer is
-                 being rebuilt. Sits above the content host so the swap to live
-                 content happens underneath it rather than as a visible flash. -->
             <Image x:Name="Placeholder"
                    Panel.ZIndex="10"
                    Visibility="Collapsed"
@@ -153,153 +156,210 @@
                    RenderOptions.BitmapScalingMode="HighQuality" />
         </Grid>
 
-        <!-- Memory strip. Deliberately always visible and stated in plain terms:
-             the cost of tabs is normally invisible, and a number nobody sees
-             cannot change behaviour (p.invisible-cost). Figures are measured
-             from our own process tree, never estimated. -->
-        <Border Grid.Row="3" Background="{StaticResource ChromeField}" Padding="12,6">
+        <!-- ── Row 3 · memory ──────────────────────────────────────────── -->
+        <Border x:Name="StatusBar" Grid.Row="3" Background="{DynamicResource Bg}" Padding="16,7">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-
                 <StackPanel Grid.Column="0" Orientation="Horizontal">
                     <TextBlock x:Name="MemoryText"
-                               Foreground="{StaticResource ChromeForeground}"
-                               FontSize="12" FontWeight="SemiBold"
+                               Foreground="{DynamicResource TextPrimary}"
+                               FontFamily="{StaticResource Body}"
+                               FontSize="{StaticResource TextSM}" FontWeight="SemiBold"
                                Text="—" />
                     <TextBlock x:Name="TabsText"
-                               Foreground="{StaticResource ChromeMuted}"
-                               FontSize="12" Margin="10,0,0,0"
-                               Text="starting up…" />
+                               Foreground="{DynamicResource TextTertiary}"
+                               FontFamily="{StaticResource Body}"
+                               FontSize="{StaticResource TextSM}" Margin="12,0,0,0"
+                               Text="starting up" />
                 </StackPanel>
-
-                <TextBlock Grid.Column="2"
-                           x:Name="SavedText"
-                           Foreground="{StaticResource ChromeMuted}"
-                           FontSize="11"
-                           HorizontalAlignment="Right" />
+                <TextBlock Grid.Column="1" x:Name="SavedText"
+                           Foreground="{DynamicResource TextTertiary}"
+                           FontFamily="{StaticResource Body}"
+                           FontSize="{StaticResource TextXS}"
+                           HorizontalAlignment="Right" VerticalAlignment="Center" />
             </Grid>
         </Border>
 
-        <!-- Big Picture: the wall of every tab, lean-back and keyboard-driven.
-             It is not a second tab strip. Entering it drops the live budget to
-             one, so browsing from here is the cheapest state the browser has —
-             the aesthetic (one page at a time, everything else a picture) and
-             the memory architecture happen to want exactly the same thing. -->
+        <!-- ── Big Picture ─────────────────────────────────────────────────
+             Spans every row and takes the window fullscreen. It cannot simply
+             stack above the page: WebView2 is a windowed HWND control and paints
+             over all WPF content regardless of Z-order (k.wpf-airspace), so the
+             content host is collapsed while this is up. -->
         <Grid x:Name="BigPicture"
               Grid.RowSpan="4"
               Panel.ZIndex="50"
               Visibility="Collapsed"
-              Background="#F21A1B1E">
+              Background="{DynamicResource Scrim}"
+              Opacity="0"
+              RenderTransformOrigin="0.5,0.5">
+            <Grid.RenderTransform>
+                <ScaleTransform x:Name="BigPictureScale" ScaleX="1" ScaleY="1" />
+            </Grid.RenderTransform>
+
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <StackPanel Grid.Row="0" Margin="40,32,40,20">
-                <TextBlock Text="All tabs"
-                           Foreground="{StaticResource ChromeForeground}"
-                           FontSize="30" FontWeight="Light" />
-                <TextBlock x:Name="BigPictureSubtitle"
-                           Foreground="{StaticResource ChromeMuted}"
-                           FontSize="14" Margin="0,4,0,0" />
-            </StackPanel>
+            <Grid Grid.Row="0" Margin="56,44,56,26">
+                <StackPanel>
+                    <TextBlock Text="Your tabs"
+                               Foreground="{DynamicResource TextPrimary}"
+                               FontFamily="{StaticResource Display}"
+                               FontSize="{StaticResource TextXL}"
+                               FontWeight="Light" />
+                    <TextBlock x:Name="BigPictureSubtitle"
+                               Foreground="{DynamicResource TextTertiary}"
+                               FontFamily="{StaticResource Body}"
+                               FontSize="{StaticResource TextMD}"
+                               Margin="0,7,0,0" />
+                </StackPanel>
+                <Button Style="{StaticResource IconButton}"
+                        Content="&#xE8BB;" FontSize="13"
+                        HorizontalAlignment="Right" VerticalAlignment="Top"
+                        ToolTip="Back to browsing  ·  Esc"
+                        Click="BigPicture_Click" />
+            </Grid>
 
-            <ListBox x:Name="TabWall"
-                     Grid.Row="1"
-                     Margin="28,0,28,0"
-                     Background="Transparent"
-                     BorderThickness="0"
-                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                     KeyDown="TabWall_KeyDown"
-                     MouseDoubleClick="TabWall_Open">
-                <ListBox.ItemsPanel>
-                    <ItemsPanelTemplate>
-                        <WrapPanel Orientation="Horizontal" />
-                    </ItemsPanelTemplate>
-                </ListBox.ItemsPanel>
+            <ScrollViewer Grid.Row="1" Margin="40,0"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
+                <ListBox x:Name="TabWall"
+                         Background="Transparent"
+                         BorderThickness="0"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                         KeyDown="TabWall_KeyDown"
+                         MouseDoubleClick="TabWall_Open">
+                    <ListBox.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <WrapPanel Orientation="Horizontal" />
+                        </ItemsPanelTemplate>
+                    </ListBox.ItemsPanel>
 
-                <ListBox.ItemContainerStyle>
-                    <Style TargetType="ListBoxItem">
-                        <Setter Property="Margin" Value="12" />
-                        <Setter Property="Padding" Value="0" />
-                        <Setter Property="Template">
-                            <Setter.Value>
-                                <ControlTemplate TargetType="ListBoxItem">
-                                    <Border x:Name="Card"
-                                            CornerRadius="10"
-                                            Background="{StaticResource ChromeField}"
-                                            BorderBrush="Transparent"
-                                            BorderThickness="3"
-                                            Padding="0">
-                                        <ContentPresenter />
-                                    </Border>
-                                    <ControlTemplate.Triggers>
-                                        <Trigger Property="IsSelected" Value="True">
-                                            <Setter TargetName="Card" Property="BorderBrush"
-                                                    Value="{StaticResource ChromeAccent}" />
-                                        </Trigger>
-                                        <Trigger Property="IsMouseOver" Value="True">
-                                            <Setter TargetName="Card" Property="BorderBrush"
-                                                    Value="#55E8833A" />
-                                        </Trigger>
-                                    </ControlTemplate.Triggers>
-                                </ControlTemplate>
-                            </Setter.Value>
-                        </Setter>
-                    </Style>
-                </ListBox.ItemContainerStyle>
+                    <ListBox.ItemContainerStyle>
+                        <Style TargetType="ListBoxItem">
+                            <Setter Property="Margin" Value="14" />
+                            <Setter Property="Padding" Value="0" />
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="ListBoxItem">
+                                        <Grid RenderTransformOrigin="0.5,0.5">
+                                            <Grid.RenderTransform>
+                                                <ScaleTransform x:Name="CardScale" ScaleX="1" ScaleY="1" />
+                                            </Grid.RenderTransform>
+                                            <Border x:Name="Card"
+                                                    CornerRadius="16"
+                                                    Background="{DynamicResource CardBg}"
+                                                    BorderBrush="Transparent"
+                                                    BorderThickness="2.5">
+                                                <Border.Effect>
+                                                    <DropShadowEffect x:Name="Shade"
+                                                                      BlurRadius="26" ShadowDepth="7"
+                                                                      Direction="270" Opacity="0.22"
+                                                                      Color="#000000" />
+                                                </Border.Effect>
+                                                <ContentPresenter />
+                                            </Border>
+                                        </Grid>
+                                        <ControlTemplate.Triggers>
+                                            <!-- Cards lift on hover the way a
+                                                 recents card does, rather than
+                                                 just changing colour. -->
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Trigger.EnterActions>
+                                                    <BeginStoryboard>
+                                                        <Storyboard>
+                                                            <DoubleAnimation Storyboard.TargetName="CardScale"
+                                                                             Storyboard.TargetProperty="ScaleX"
+                                                                             To="1.035" Duration="{StaticResource Medium}"
+                                                                             EasingFunction="{StaticResource EaseOutStrong}" />
+                                                            <DoubleAnimation Storyboard.TargetName="CardScale"
+                                                                             Storyboard.TargetProperty="ScaleY"
+                                                                             To="1.035" Duration="{StaticResource Medium}"
+                                                                             EasingFunction="{StaticResource EaseOutStrong}" />
+                                                        </Storyboard>
+                                                    </BeginStoryboard>
+                                                </Trigger.EnterActions>
+                                                <Trigger.ExitActions>
+                                                    <BeginStoryboard>
+                                                        <Storyboard>
+                                                            <DoubleAnimation Storyboard.TargetName="CardScale"
+                                                                             Storyboard.TargetProperty="ScaleX"
+                                                                             To="1" Duration="{StaticResource Medium}"
+                                                                             EasingFunction="{StaticResource EaseOut}" />
+                                                            <DoubleAnimation Storyboard.TargetName="CardScale"
+                                                                             Storyboard.TargetProperty="ScaleY"
+                                                                             To="1" Duration="{StaticResource Medium}"
+                                                                             EasingFunction="{StaticResource EaseOut}" />
+                                                        </Storyboard>
+                                                    </BeginStoryboard>
+                                                </Trigger.ExitActions>
+                                            </Trigger>
+                                            <Trigger Property="IsSelected" Value="True">
+                                                <Setter TargetName="Card" Property="BorderBrush"
+                                                        Value="{DynamicResource Accent}" />
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
+                        </Style>
+                    </ListBox.ItemContainerStyle>
 
-                <ListBox.ItemTemplate>
-                    <DataTemplate>
-                        <StackPanel Width="300">
-                            <!-- The snapshot IS the hibernation artifact. The
-                                 mechanism that makes tabs cheap is the same one
-                                 that makes them findable. -->
-                            <Grid Height="176">
-                                <Border Background="#22FFFFFF" CornerRadius="7,7,0,0">
-                                    <TextBlock Text="{Binding HostLabel}"
-                                               Foreground="{StaticResource ChromeMuted}"
-                                               FontSize="17"
-                                               HorizontalAlignment="Center"
-                                               VerticalAlignment="Center" />
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel Width="308">
+                                <Border CornerRadius="14,14,0,0" ClipToBounds="True" Height="182">
+                                    <Grid>
+                                        <Border Background="{DynamicResource CardPlaceholder}">
+                                            <TextBlock Text="{Binding HostLabel}"
+                                                       Foreground="{DynamicResource TextTertiary}"
+                                                       FontFamily="{StaticResource Display}"
+                                                       FontSize="{StaticResource TextLG}"
+                                                       FontWeight="Light"
+                                                       HorizontalAlignment="Center"
+                                                       VerticalAlignment="Center" />
+                                        </Border>
+                                        <Image Source="{Binding SnapshotPath, Converter={StaticResource Snapshot}}"
+                                               Stretch="UniformToFill"
+                                               StretchDirection="Both"
+                                               VerticalAlignment="Top"
+                                               RenderOptions.BitmapScalingMode="HighQuality" />
+                                    </Grid>
                                 </Border>
-                                <Image Source="{Binding SnapshotPath, Converter={StaticResource Snapshot}}"
-                                       Stretch="UniformToFill"
-                                       StretchDirection="Both"
-                                       VerticalAlignment="Top"
-                                       HorizontalAlignment="Center" />
-                            </Grid>
-
-                            <StackPanel Margin="14,11,14,13">
-                                <TextBlock Text="{Binding Title}"
-                                           Foreground="{StaticResource ChromeForeground}"
-                                           FontSize="15"
-                                           TextTrimming="CharacterEllipsis"
-                                           MaxHeight="42"
-                                           TextWrapping="Wrap" />
-                                <StackPanel Orientation="Horizontal" Margin="0,7,0,0">
-                                    <Ellipse Width="8" Height="8" VerticalAlignment="Center"
-                                             Fill="{Binding State, Converter={StaticResource StateToBrush}}" />
-                                    <TextBlock Text="{Binding HostLabel}"
-                                               Foreground="{StaticResource ChromeMuted}"
-                                               FontSize="12" Margin="7,0,0,0"
-                                               TextTrimming="CharacterEllipsis" />
+                                <StackPanel Margin="17,13,17,15">
+                                    <TextBlock Text="{Binding Title}"
+                                               Foreground="{DynamicResource TextPrimary}"
+                                               FontFamily="{StaticResource Body}"
+                                               FontSize="{StaticResource TextMD}"
+                                               TextTrimming="CharacterEllipsis"
+                                               TextWrapping="NoWrap" />
+                                    <StackPanel Orientation="Horizontal" Margin="0,7,0,0">
+                                        <Ellipse Width="6" Height="6" VerticalAlignment="Center"
+                                                 Fill="{Binding State, Converter={StaticResource StateToBrush}}" />
+                                        <TextBlock Text="{Binding HostLabel}"
+                                                   Foreground="{DynamicResource TextTertiary}"
+                                                   FontFamily="{StaticResource Body}"
+                                                   FontSize="{StaticResource TextSM}"
+                                                   Margin="8,0,0,0"
+                                                   TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
                                 </StackPanel>
                             </StackPanel>
-                        </StackPanel>
-                    </DataTemplate>
-                </ListBox.ItemTemplate>
-            </ListBox>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </ScrollViewer>
 
-            <TextBlock Grid.Row="2" Margin="40,16,40,28"
-                       Foreground="{StaticResource ChromeMuted}"
-                       FontSize="13"
-                       Text="Arrow keys to move  ·  Enter to open  ·  Esc to go back  ·  F11 to toggle" />
+            <TextBlock Grid.Row="2" Margin="56,20,56,36"
+                       Foreground="{DynamicResource TextTertiary}"
+                       FontFamily="{StaticResource Body}"
+                       FontSize="{StaticResource TextSM}"
+                       Text="Arrow keys to move    Enter to open    Esc to go back" />
         </Grid>
     </Grid>
 </Window>

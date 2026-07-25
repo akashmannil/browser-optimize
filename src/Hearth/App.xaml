@@ -2,83 +2,345 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:views="clr-namespace:Hearth.Views"
+             xmlns:sys="clr-namespace:System;assembly=System.Runtime"
              StartupUri="Views/MainWindow.xaml">
     <Application.Resources>
-        <SolidColorBrush x:Key="ChromeBackground" Color="#1E1F22" />
-        <SolidColorBrush x:Key="ChromeForeground" Color="#E3E3E3" />
-        <SolidColorBrush x:Key="ChromeMuted"      Color="#8A8D93" />
-        <SolidColorBrush x:Key="ChromeAccent"     Color="#E8833A" />
-        <SolidColorBrush x:Key="ChromeField"      Color="#2B2D31" />
+        <ResourceDictionary>
 
-        <views:StateToBrushConverter x:Key="StateToBrush" />
-        <views:SnapshotConverter x:Key="Snapshot" />
+            <!-- Slot 0 is the theme token dictionary. ThemeManager replaces this
+                 entry in place at runtime, so everything below must reference
+                 tokens with DynamicResource, never StaticResource. -->
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Themes/Dark.xaml" />
+            </ResourceDictionary.MergedDictionaries>
 
-        <!-- Toolbar button: square hit target, no chrome until hovered. Disabled
-             state matters here — back/forward are dead most of the time and
-             should look it rather than inviting a click that does nothing. -->
-        <Style x:Key="ToolButton" TargetType="Button">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource ChromeForeground}" />
-            <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Width" Value="32" />
-            <Setter Property="Height" Value="30" />
-            <Setter Property="FontSize" Value="14" />
-            <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="Chrome" Background="{TemplateBinding Background}"
-                                CornerRadius="5">
-                            <ContentPresenter HorizontalAlignment="Center"
-                                              VerticalAlignment="Center" />
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Chrome" Property="Background"
-                                        Value="#33FFFFFF" />
-                            </Trigger>
-                            <Trigger Property="IsEnabled" Value="False">
-                                <Setter Property="Opacity" Value="0.3" />
-                                <Setter Property="Cursor" Value="Arrow" />
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
+            <!-- ── Type ────────────────────────────────────────────────────
+                 WPF has no letter-spacing, so the Apple feel comes from weight
+                 and scale instead of tracking: Light/SemiLight at large sizes,
+                 a wide jump to small secondary text, and plenty of air.
+                 Segoe UI Variable is the platform's own display face. -->
+            <FontFamily x:Key="Display">Segoe UI Variable Display, Segoe UI, system-ui</FontFamily>
+            <FontFamily x:Key="Body">Segoe UI Variable Text, Segoe UI, system-ui</FontFamily>
 
-        <!-- Mode toggle: reads as pressed when its mode is engaged, because a
-             browser that has silently changed how it loads pages must say so. -->
-        <Style x:Key="ModeToggle" TargetType="ToggleButton">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{StaticResource ChromeMuted}" />
-            <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Padding" Value="11,5" />
-            <Setter Property="FontSize" Value="11" />
-            <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="ToggleButton">
-                        <Border x:Name="Chrome" Background="{TemplateBinding Background}"
-                                CornerRadius="999" Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="Center"
-                                              VerticalAlignment="Center" />
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Chrome" Property="Background"
-                                        Value="#33FFFFFF" />
-                            </Trigger>
-                            <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="Chrome" Property="Background"
-                                        Value="{StaticResource ChromeAccent}" />
-                                <Setter Property="Foreground" Value="#1E1F22" />
-                                <Setter Property="FontWeight" Value="SemiBold" />
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
+            <sys:Double x:Key="TextXS">11.5</sys:Double>
+            <sys:Double x:Key="TextSM">12.5</sys:Double>
+            <sys:Double x:Key="TextMD">13.5</sys:Double>
+            <sys:Double x:Key="TextLG">17</sys:Double>
+            <sys:Double x:Key="TextXL">34</sys:Double>
+
+            <Duration x:Key="Fast">0:0:0.16</Duration>
+            <Duration x:Key="Medium">0:0:0.28</Duration>
+
+            <CubicEase x:Key="EaseOut" EasingMode="EaseOut" />
+            <QuarticEase x:Key="EaseOutStrong" EasingMode="EaseOut" />
+
+            <views:StateToBrushConverter x:Key="StateToBrush" />
+            <views:SnapshotConverter x:Key="Snapshot" />
+
+            <!-- ── Window caption buttons ──────────────────────────────────
+                 Windows' own metrics: 46x32, no rounding, close goes red. Users
+                 reach for these by muscle memory, so they are the one place the
+                 design should not be inventive. -->
+            <Style x:Key="CaptionButton" TargetType="Button">
+                <Setter Property="Width" Value="46" />
+                <Setter Property="Height" Value="34" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
+                <Setter Property="FontSize" Value="10" />
+                <Setter Property="WindowChrome.IsHitTestVisibleInChrome" Value="True" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="B" Background="{TemplateBinding Background}">
+                                <ContentPresenter HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center" />
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="B" Property="Background"
+                                            Value="{DynamicResource Hover}" />
+                                    <Setter Property="Foreground"
+                                            Value="{DynamicResource TextPrimary}" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <Style x:Key="CloseButton" TargetType="Button" BasedOn="{StaticResource CaptionButton}">
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="B" Background="Transparent">
+                                <ContentPresenter HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center" />
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="B" Property="Background"
+                                            Value="{DynamicResource CloseHover}" />
+                                    <Setter Property="Foreground" Value="White" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <!-- ── Round icon button ───────────────────────────────────────
+                 The hover disc scales up from 0.7 rather than appearing, which
+                 is the small thing that reads as "smooth" instead of "snappy". -->
+            <Style x:Key="IconButton" TargetType="Button">
+                <Setter Property="Width" Value="32" />
+                <Setter Property="Height" Value="32" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
+                <Setter Property="FontSize" Value="12" />
+                <Setter Property="Cursor" Value="Hand" />
+                <Setter Property="WindowChrome.IsHitTestVisibleInChrome" Value="True" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Grid Background="Transparent">
+                                <Border x:Name="Disc"
+                                        Background="{DynamicResource Hover}"
+                                        CornerRadius="16"
+                                        Opacity="0"
+                                        RenderTransformOrigin="0.5,0.5">
+                                    <Border.RenderTransform>
+                                        <ScaleTransform x:Name="DiscScale" ScaleX="0.7" ScaleY="0.7" />
+                                    </Border.RenderTransform>
+                                </Border>
+                                <ContentPresenter HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center" />
+                            </Grid>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Trigger.EnterActions>
+                                        <BeginStoryboard>
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="Disc"
+                                                                 Storyboard.TargetProperty="Opacity"
+                                                                 To="1" Duration="{StaticResource Fast}"
+                                                                 EasingFunction="{StaticResource EaseOut}" />
+                                                <DoubleAnimation Storyboard.TargetName="DiscScale"
+                                                                 Storyboard.TargetProperty="ScaleX"
+                                                                 To="1" Duration="{StaticResource Fast}"
+                                                                 EasingFunction="{StaticResource EaseOut}" />
+                                                <DoubleAnimation Storyboard.TargetName="DiscScale"
+                                                                 Storyboard.TargetProperty="ScaleY"
+                                                                 To="1" Duration="{StaticResource Fast}"
+                                                                 EasingFunction="{StaticResource EaseOut}" />
+                                            </Storyboard>
+                                        </BeginStoryboard>
+                                    </Trigger.EnterActions>
+                                    <Trigger.ExitActions>
+                                        <BeginStoryboard>
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="Disc"
+                                                                 Storyboard.TargetProperty="Opacity"
+                                                                 To="0" Duration="{StaticResource Fast}" />
+                                                <DoubleAnimation Storyboard.TargetName="DiscScale"
+                                                                 Storyboard.TargetProperty="ScaleX"
+                                                                 To="0.7" Duration="{StaticResource Fast}" />
+                                                <DoubleAnimation Storyboard.TargetName="DiscScale"
+                                                                 Storyboard.TargetProperty="ScaleY"
+                                                                 To="0.7" Duration="{StaticResource Fast}" />
+                                            </Storyboard>
+                                        </BeginStoryboard>
+                                    </Trigger.ExitActions>
+                                    <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+                                </Trigger>
+                                <Trigger Property="IsEnabled" Value="False">
+                                    <Setter Property="Opacity" Value="0.28" />
+                                    <Setter Property="Cursor" Value="Arrow" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <!-- ── Pill toggle ─────────────────────────────────────────────
+                 Animates its fill so engaging a mode is a transition rather
+                 than a flicker — it must be unmistakable that low power is on,
+                 because it silently changes how pages load. -->
+            <Style x:Key="PillToggle" TargetType="ToggleButton">
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="FontFamily" Value="{StaticResource Body}" />
+                <Setter Property="FontSize" Value="{StaticResource TextSM}" />
+                <Setter Property="Padding" Value="13,6" />
+                <Setter Property="Cursor" Value="Hand" />
+                <Setter Property="WindowChrome.IsHitTestVisibleInChrome" Value="True" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="ToggleButton">
+                            <Grid>
+                                <Border x:Name="Fill"
+                                        Background="{DynamicResource Accent}"
+                                        CornerRadius="999" Opacity="0" />
+                                <Border x:Name="Ghost"
+                                        Background="{DynamicResource Hover}"
+                                        CornerRadius="999" Opacity="0" />
+                                <ContentPresenter Margin="{TemplateBinding Padding}"
+                                                  HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center" />
+                            </Grid>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Trigger.EnterActions>
+                                        <BeginStoryboard>
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="Ghost"
+                                                                 Storyboard.TargetProperty="Opacity"
+                                                                 To="1" Duration="{StaticResource Fast}" />
+                                            </Storyboard>
+                                        </BeginStoryboard>
+                                    </Trigger.EnterActions>
+                                    <Trigger.ExitActions>
+                                        <BeginStoryboard>
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="Ghost"
+                                                                 Storyboard.TargetProperty="Opacity"
+                                                                 To="0" Duration="{StaticResource Fast}" />
+                                            </Storyboard>
+                                        </BeginStoryboard>
+                                    </Trigger.ExitActions>
+                                </Trigger>
+                                <Trigger Property="IsChecked" Value="True">
+                                    <Trigger.EnterActions>
+                                        <BeginStoryboard>
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="Fill"
+                                                                 Storyboard.TargetProperty="Opacity"
+                                                                 To="1" Duration="{StaticResource Medium}"
+                                                                 EasingFunction="{StaticResource EaseOut}" />
+                                            </Storyboard>
+                                        </BeginStoryboard>
+                                    </Trigger.EnterActions>
+                                    <Trigger.ExitActions>
+                                        <BeginStoryboard>
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="Fill"
+                                                                 Storyboard.TargetProperty="Opacity"
+                                                                 To="0" Duration="{StaticResource Medium}" />
+                                            </Storyboard>
+                                        </BeginStoryboard>
+                                    </Trigger.ExitActions>
+                                    <Setter Property="Foreground" Value="{DynamicResource OnAccent}" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <!-- ── Tab chip ────────────────────────────────────────────────
+                 A ListBoxItem, so selection is the framework's job. The heat pip
+                 stays visible at all times: the whole product argument is that
+                 this cost is normally invisible. -->
+            <Style x:Key="TabChip" TargetType="ListBoxItem">
+                <Setter Property="Margin" Value="0,0,3,0" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="WindowChrome.IsHitTestVisibleInChrome" Value="True" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="ListBoxItem">
+                            <Grid>
+                                <Border x:Name="Ghost" CornerRadius="8"
+                                        Background="{DynamicResource Hover}" Opacity="0" />
+                                <Border x:Name="Sel" CornerRadius="8"
+                                        Background="{DynamicResource TabActive}" Opacity="0" />
+                                <ContentPresenter Margin="11,7" />
+                            </Grid>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Trigger.EnterActions>
+                                        <BeginStoryboard>
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="Ghost"
+                                                                 Storyboard.TargetProperty="Opacity"
+                                                                 To="1" Duration="{StaticResource Fast}" />
+                                            </Storyboard>
+                                        </BeginStoryboard>
+                                    </Trigger.EnterActions>
+                                    <Trigger.ExitActions>
+                                        <BeginStoryboard>
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="Ghost"
+                                                                 Storyboard.TargetProperty="Opacity"
+                                                                 To="0" Duration="{StaticResource Fast}" />
+                                            </Storyboard>
+                                        </BeginStoryboard>
+                                    </Trigger.ExitActions>
+                                </Trigger>
+                                <Trigger Property="IsSelected" Value="True">
+                                    <Trigger.EnterActions>
+                                        <BeginStoryboard>
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="Sel"
+                                                                 Storyboard.TargetProperty="Opacity"
+                                                                 To="1" Duration="{StaticResource Fast}"
+                                                                 EasingFunction="{StaticResource EaseOut}" />
+                                            </Storyboard>
+                                        </BeginStoryboard>
+                                    </Trigger.EnterActions>
+                                    <Trigger.ExitActions>
+                                        <BeginStoryboard>
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="Sel"
+                                                                 Storyboard.TargetProperty="Opacity"
+                                                                 To="0" Duration="{StaticResource Fast}" />
+                                            </Storyboard>
+                                        </BeginStoryboard>
+                                    </Trigger.ExitActions>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <!-- ── Address field ───────────────────────────────────────────-->
+            <Style x:Key="AddressField" TargetType="TextBox">
+                <Setter Property="Background" Value="{DynamicResource Surface}" />
+                <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+                <Setter Property="CaretBrush" Value="{DynamicResource TextPrimary}" />
+                <Setter Property="SelectionBrush" Value="{DynamicResource Accent}" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="FontFamily" Value="{StaticResource Body}" />
+                <Setter Property="FontSize" Value="{StaticResource TextMD}" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
+                <Setter Property="WindowChrome.IsHitTestVisibleInChrome" Value="True" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="TextBox">
+                            <Border x:Name="B"
+                                    Background="{TemplateBinding Background}"
+                                    CornerRadius="9"
+                                    Padding="14,8"
+                                    BorderThickness="1.5"
+                                    BorderBrush="Transparent">
+                                <ScrollViewer x:Name="PART_ContentHost" />
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsKeyboardFocused" Value="True">
+                                    <Setter TargetName="B" Property="BorderBrush"
+                                            Value="{DynamicResource Accent}" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+        </ResourceDictionary>
     </Application.Resources>
 </Application>

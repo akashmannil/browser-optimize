@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Hearth.Core;
@@ -14,14 +15,42 @@ public partial class MainWindow : Window
 {
     private const string HomeUrl = "https://example.com";
 
+    // Separators and punctuation in this file stay ASCII on purpose. A
+    // PowerShell round-trip over this source once re-encoded every non-ASCII
+    // character (PS 5.1 reads BOM-less UTF-8 as ANSI), and the damage showed up
+    // in the shipped UI as "6 open A. one stays awake". Anything user-visible
+    // that needs real typography is set in XAML, which is read as UTF-8.
+    private const string Dot = "·";   // middle dot
+    private const string Dash = "—";  // em dash
+
     private TabManager? _tabs;
     private DispatcherTimer? _memoryTimer;
     private long _peakBytes;
+    private WindowState _stateBeforeBigPicture = WindowState.Normal;
+
+    /// <summary>Guards against SelectionChanged firing while we set the selection.</summary>
+    private bool _syncing;
 
     public MainWindow()
     {
         InitializeComponent();
+        // HEARTH_THEME pins the theme for screenshots and comparison runs.
+        // Defaults to following Windows, which is what a browser should do.
+        ThemeManager.Apply(Environment.GetEnvironmentVariable("HEARTH_THEME") switch
+        {
+            "light" or "Light" => AppTheme.Light,
+            "dark" or "Dark" => AppTheme.Dark,
+            _ => AppTheme.System
+        });
+        ThemeManager.WatchSystem();
+
+        // Custom chrome maximises over the taskbar unless WM_GETMINMAXINFO is
+        // answered with the work area. Without this the bottom row of the
+        // layout, the memory readout, disappears when maximised.
+        MaximiseFix.Attach(this);
+
         Loaded += OnLoaded;
+        StateChanged += (_, _) => UpdateMaximiseGlyph();
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
@@ -29,10 +58,6 @@ public partial class MainWindow : Window
         _tabs = new TabManager(ContentHost, HearthOptions.FromEnvironment());
         _tabs.Changed += (_, _) => Dispatcher.Invoke(Sync);
         _tabs.Rehydrating += (_, tab) => Dispatcher.Invoke(() => ShowPlaceholder(tab));
-
-        // The placeholder is held for a beat after the renderer returns: the
-        // controller reports ready before it has painted, and dropping the
-        // image on that signal shows a white flash instead of hiding one.
         _tabs.Rehydrated += (_, _) => Dispatcher.InvokeAsync(async () =>
         {
             await Task.Delay(220);
@@ -40,6 +65,7 @@ public partial class MainWindow : Window
         });
 
         TabStrip.ItemsSource = _tabs.Tabs;
+        TabWall.ItemsSource = _tabs.Tabs;
 
         if (_tabs.Options.StartInLowPower)
         {
@@ -47,9 +73,6 @@ public partial class MainWindow : Window
             LowPowerToggle.IsChecked = true;
         }
 
-        // Startup URLs may be passed on the command line, which is ordinary
-        // browser behaviour and — more usefully here — makes memory runs at a
-        // given tab count reproducible without hand-clicking the strip.
         var startup = Environment.GetCommandLineArgs().Skip(1).ToArray();
         if (startup.Length == 0)
         {
@@ -57,42 +80,58 @@ public partial class MainWindow : Window
         }
         else if (Environment.GetEnvironmentVariable("HEARTH_ACTIVATE_ALL") is "1" or "true")
         {
-            // Benchmark mode: visit every tab in turn so they all become Live and
-            // the budget actually binds. Without this the budget can't be
-            // measured at all — ordinary startup realises only one tab, so live
-            // count never reaches the ceiling.
             foreach (var url in startup)
             {
                 var tab = _tabs.Open(url, activate: false);
                 await _tabs.ActivateAsync(tab);
 
-                // Dwell until the page has actually painted. ActivateAsync
-                // returns once the renderer exists, not once the document has
-                // loaded, so advancing immediately would blur every tab before
-                // its first paint — producing no snapshots and, in turn, no
-                // teardowns. A person reads a page before moving on; a harness
-                // that doesn't is measuring a workload nobody has.
+                // Dwell until the page has painted. ActivateAsync returns once
+                // the renderer exists, not once the document has loaded, so
+                // advancing immediately would blur every tab before first paint
+                // and produce no snapshots at all.
                 for (var waited = 0; waited < 80 && !tab.HasRendered; waited++)
                     await Task.Delay(100);
             }
         }
         else
         {
-            // Only the last becomes active; the rest stay Cold until visited,
-            // which is the default-state inversion doing its job.
             for (var i = 0; i < startup.Length; i++)
                 _tabs.Open(startup[i], activate: i == startup.Length - 1);
         }
 
         StartMemorySampling();
+        UpdateMaximiseGlyph();
 
-        // Surfacing the runtime version proves the shared environment resolved.
         var version = await _tabs.GetRuntimeVersionAsync();
-        Title = $"Hearth — WebView2 {version}";
+        Title = $"Hearth {Dash} WebView2 {version}";
         Sync();
     }
 
-    /// <summary>Pulls window chrome back in line with tab-manager state.</summary>
+    // Window chrome ----------------------------------------------------------
+
+    private void Minimise_Click(object sender, RoutedEventArgs e) =>
+        WindowState = WindowState.Minimized;
+
+    private void Maximise_Click(object sender, RoutedEventArgs e) =>
+        WindowState = WindowState == WindowState.Maximized
+            ? WindowState.Normal
+            : WindowState.Maximized;
+
+    private void Close_Click(object sender, RoutedEventArgs e) => Close();
+
+    private void UpdateMaximiseGlyph() =>
+        // E923 restore-down, E922 maximise: the same glyphs Windows uses, so the
+        // control keeps meaning what people expect it to mean.
+        MaxButton.Content = WindowState == WindowState.Maximized ? "" : "";
+
+    private void Theme_Click(object sender, RoutedEventArgs e)
+    {
+        var next = ThemeManager.Cycle();
+        ThemeButton.ToolTip = $"Theme: {next}";
+    }
+
+    // Sync -------------------------------------------------------------------
+
     private void Sync()
     {
         if (_tabs is null) return;
@@ -101,25 +140,23 @@ public partial class MainWindow : Window
         if (active is not null && !AddressBar.IsFocused)
             AddressBar.Text = active.Url;
 
+        _syncing = true;
+        if (!ReferenceEquals(TabStrip.SelectedItem, active)) TabStrip.SelectedItem = active;
+        _syncing = false;
+
         var core = active?.View?.CoreWebView2;
         BackButton.IsEnabled = core?.CanGoBack ?? false;
         ForwardButton.IsEnabled = core?.CanGoForward ?? false;
         ReloadButton.IsEnabled = core is not null;
 
-        // "Awake" and "resting" rather than "live" and "hibernated". Resting
-        // carries the promise that matters — it will be there when you come
-        // back — where the mechanism's own vocabulary carries nothing.
+        // "Awake" and "resting", not "live" and "hibernated". Resting carries
+        // the promise that matters: it will be there when you come back.
         var resting = _tabs.Tabs.Count - _tabs.LiveCount;
         TabsText.Text = resting > 0
-            ? $"{_tabs.LiveCount} awake · {resting} resting"
+            ? $"{_tabs.LiveCount} awake {Dot} {resting} resting"
             : $"{_tabs.LiveCount} awake";
     }
 
-    /// <summary>
-    /// Samples real memory on a timer. Measured from our own process tree, never
-    /// estimated — the project's whole argument is that the cost is real, and a
-    /// fabricated number would forfeit that.
-    /// </summary>
     private void StartMemorySampling()
     {
         _memoryTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
@@ -130,9 +167,6 @@ public partial class MainWindow : Window
 
             MemoryText.Text = MemoryProbe.Format(reading.TotalBytes);
 
-            // Peak-versus-current is the closest honest statement we can make
-            // about savings without a counterfactual run: it is what this
-            // session actually reached, against what it holds now.
             var saved = _peakBytes - reading.TotalBytes;
             SavedText.Text = saved > 32 * 1024 * 1024
                 ? $"{MemoryProbe.Format(saved)} returned since this session's peak"
@@ -141,136 +175,8 @@ public partial class MainWindow : Window
         _memoryTimer.Start();
     }
 
-    private void Back_Click(object sender, RoutedEventArgs e)
-    {
-        var core = _tabs?.Active?.View?.CoreWebView2;
-        if (core?.CanGoBack == true) core.GoBack();
-    }
+    // Placeholder ------------------------------------------------------------
 
-    private void Forward_Click(object sender, RoutedEventArgs e)
-    {
-        var core = _tabs?.Active?.View?.CoreWebView2;
-        if (core?.CanGoForward == true) core.GoForward();
-    }
-
-    private void Reload_Click(object sender, RoutedEventArgs e) =>
-        _tabs?.Active?.View?.CoreWebView2?.Reload();
-
-    private void Home_Click(object sender, RoutedEventArgs e)
-    {
-        if (_tabs?.Active is { } tab) _tabs.Navigate(tab, HomeUrl);
-    }
-
-    private async void LowPower_Changed(object sender, RoutedEventArgs e)
-    {
-        if (_tabs is null) return;
-        await _tabs.SetLowPowerAsync(LowPowerToggle.IsChecked == true);
-        Sync();
-    }
-
-    // ── Big Picture ──────────────────────────────────────────────────────────
-
-    private void BigPicture_Click(object sender, RoutedEventArgs e) =>
-        _ = SetBigPictureAsync(BigPicture.Visibility != Visibility.Visible);
-
-    private async Task SetBigPictureAsync(bool on)
-    {
-        if (_tabs is null) return;
-
-        await _tabs.SetBigPictureAsync(on);
-
-        BigPicture.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
-
-        // WPF airspace: WebView2 is a windowed HWND control hosted through
-        // HwndHost, so it paints above ALL WPF content regardless of Z-order.
-        // An overlay cannot be stacked on top of it — the web content has to be
-        // taken off screen instead. This is also the honest thing to do here:
-        // Big Picture shows pictures, so no live page needs to be visible.
-        ContentHost.Visibility = on ? Visibility.Collapsed : Visibility.Visible;
-        if (on) HidePlaceholder();
-
-        if (on)
-        {
-            TabWall.ItemsSource = _tabs.Tabs;
-            TabWall.SelectedItem = _tabs.Active;
-            BigPictureSubtitle.Text =
-                $"{_tabs.Tabs.Count} tabs · one stays awake while you're here";
-
-            // Focus the wall so arrow keys work without a click first — the
-            // whole point of this mode is that it is driven from a distance.
-            TabWall.Focus();
-            if (TabWall.SelectedItem is not null)
-                TabWall.ScrollIntoView(TabWall.SelectedItem);
-        }
-        else
-        {
-            AddressBar.Focus();
-        }
-
-        Sync();
-    }
-
-    private async void TabWall_KeyDown(object sender, KeyEventArgs e)
-    {
-        if (e.Key is not (Key.Enter or Key.Space)) return;
-        e.Handled = true;
-        await OpenSelectedAsync();
-    }
-
-    private async void TabWall_Open(object sender, MouseButtonEventArgs e) =>
-        await OpenSelectedAsync();
-
-    private async Task OpenSelectedAsync()
-    {
-        if (_tabs is null || TabWall.SelectedItem is not BrowserTab tab) return;
-        await _tabs.ActivateAsync(tab);
-        await SetBigPictureAsync(false);
-    }
-
-    private async void Window_PreviewKeyDown(object sender, KeyEventArgs e)
-    {
-        var showing = BigPicture.Visibility == Visibility.Visible;
-
-        switch (e.Key)
-        {
-            case Key.F11:
-                e.Handled = true;
-                await SetBigPictureAsync(!showing);
-                break;
-
-            // Escape only means "go back" while the wall is up; elsewhere it
-            // belongs to the page.
-            case Key.Escape when showing:
-                e.Handled = true;
-                await SetBigPictureAsync(false);
-                break;
-        }
-    }
-
-
-    private void Navigate()
-    {
-        if (_tabs?.Active is not { } active) return;
-
-        var raw = AddressBar.Text.Trim();
-        if (raw.Length == 0) return;
-
-        // No scheme and no dot means the user typed a query, not an address.
-        var url = raw.Contains("://")
-            ? raw
-            : raw.Contains('.') && !raw.Contains(' ')
-                ? "https://" + raw
-                : "https://duckduckgo.com/?q=" + Uri.EscapeDataString(raw);
-
-        _tabs.Navigate(active, url);
-    }
-
-    /// <summary>
-    /// Paints the tab's captured frame while its renderer is rebuilt, then
-    /// clears it once live content is behind it. The image is loaded
-    /// OnLoad + cached so the file handle is released immediately — otherwise a
-    /// later capture to the same path fails with a sharing violation.
-    /// </summary>
     private void ShowPlaceholder(BrowserTab tab)
     {
         if (_tabs?.Snapshots.Get(tab.Id) is not { } snap || !File.Exists(snap.ImagePath))
@@ -305,11 +211,47 @@ public partial class MainWindow : Window
         Placeholder.Source = null;
     }
 
-    private void GoButton_Click(object sender, RoutedEventArgs e) => Navigate();
+    // Navigation -------------------------------------------------------------
+
+    private void Navigate()
+    {
+        if (_tabs?.Active is not { } active) return;
+
+        var raw = AddressBar.Text.Trim();
+        if (raw.Length == 0) return;
+
+        var url = raw.Contains("://")
+            ? raw
+            : raw.Contains('.') && !raw.Contains(' ')
+                ? "https://" + raw
+                : "https://duckduckgo.com/?q=" + Uri.EscapeDataString(raw);
+
+        _tabs.Navigate(active, url);
+    }
 
     private void AddressBar_KeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key == Key.Enter) Navigate();
+    }
+
+    private void Back_Click(object sender, RoutedEventArgs e)
+    {
+        var core = _tabs?.Active?.View?.CoreWebView2;
+        if (core?.CanGoBack == true) core.GoBack();
+    }
+
+    private void Forward_Click(object sender, RoutedEventArgs e)
+    {
+        var core = _tabs?.Active?.View?.CoreWebView2;
+        if (core?.CanGoForward == true) core.GoForward();
+    }
+
+    private void Reload_Click(object sender, RoutedEventArgs e) =>
+        _tabs?.Active?.View?.CoreWebView2?.Reload();
+
+    private void Home_Click(object sender, RoutedEventArgs e)
+    {
+        if (_tabs?.Active is { } tab) _tabs.Navigate(tab, HomeUrl);
     }
 
     private void NewTab_Click(object sender, RoutedEventArgs e)
@@ -325,25 +267,143 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
-    private void TabStrip_Click(object sender, MouseButtonEventArgs e)
+    private void TabStrip_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        // The close button handles its own click and marks it handled, so
-        // anything reaching here is a request to activate the chip.
-        if (e.OriginalSource is not DependencyObject source) return;
-
-        var container = FindAncestorItem(source);
-        if (container?.DataContext is BrowserTab tab) _ = _tabs?.ActivateAsync(tab);
+        if (_syncing || _tabs is null) return;
+        if (TabStrip.SelectedItem is BrowserTab tab && !ReferenceEquals(tab, _tabs.Active))
+            _ = _tabs.ActivateAsync(tab);
     }
 
-    private static FrameworkElement? FindAncestorItem(DependencyObject source)
+    private async void LowPower_Changed(object sender, RoutedEventArgs e)
     {
-        while (source is not null)
-        {
-            if (source is FrameworkElement { DataContext: BrowserTab } element)
-                return element;
+        if (_tabs is null) return;
+        await _tabs.SetLowPowerAsync(LowPowerToggle.IsChecked == true);
+        Sync();
+    }
 
-            source = VisualTreeHelper.GetParent(source);
+    // Big Picture ------------------------------------------------------------
+
+    private void BigPicture_Click(object sender, RoutedEventArgs e) =>
+        _ = SetBigPictureAsync(BigPicture.Visibility != Visibility.Visible);
+
+    private async Task SetBigPictureAsync(bool on)
+    {
+        if (_tabs is null) return;
+        if ((BigPicture.Visibility == Visibility.Visible) == on) return;
+
+        if (on)
+        {
+            await _tabs.SetBigPictureAsync(true);
+
+            // Genuinely fullscreen rather than an overlay: the chrome rows are
+            // collapsed and the window maximises, so the wall owns the screen
+            // the way a lean-back interface should.
+            _stateBeforeBigPicture = WindowState;
+            TitleBar.Visibility = Visibility.Collapsed;
+            NavBar.Visibility = Visibility.Collapsed;
+            StatusBar.Visibility = Visibility.Collapsed;
+            WindowState = WindowState.Maximized;
+
+            // WebView2 paints above all WPF content (k.wpf-airspace), so the
+            // host has to leave the screen rather than sit behind the overlay.
+            ContentHost.Visibility = Visibility.Collapsed;
+            HidePlaceholder();
+
+            BigPicture.Visibility = Visibility.Visible;
+            BigPictureSubtitle.Text =
+                $"{_tabs.Tabs.Count} open {Dot} one stays awake while you're here";
+
+            TabWall.SelectedItem = _tabs.Active;
+            TabWall.Focus();
+            if (TabWall.SelectedItem is not null) TabWall.ScrollIntoView(TabWall.SelectedItem);
+
+            AnimateBigPicture(fadeIn: true);
         }
-        return null;
+        else
+        {
+            await AnimateBigPictureOutAsync();
+
+            BigPicture.Visibility = Visibility.Collapsed;
+            TitleBar.Visibility = Visibility.Visible;
+            NavBar.Visibility = Visibility.Visible;
+            StatusBar.Visibility = Visibility.Visible;
+            ContentHost.Visibility = Visibility.Visible;
+            WindowState = _stateBeforeBigPicture;
+
+            await _tabs.SetBigPictureAsync(false);
+
+            // Leaving the wall means the user surveyed and chose. Everything
+            // else goes back to sleep now rather than waiting for some later
+            // activation to push it past the ceiling.
+            await _tabs.HibernateAllButActiveAsync();
+
+            AddressBar.Focus();
+        }
+
+        Sync();
+    }
+
+    /// <summary>
+    /// Fades and scales the wall in. Starting slightly small and settling to
+    /// full size reads as the surface arriving; a plain fade reads as a dialog
+    /// appearing.
+    /// </summary>
+    private void AnimateBigPicture(bool fadeIn)
+    {
+        var ease = new QuarticEase { EasingMode = EasingMode.EaseOut };
+        var duration = TimeSpan.FromMilliseconds(300);
+
+        BigPictureScale.ScaleX = BigPictureScale.ScaleY = fadeIn ? 0.965 : 1;
+
+        BigPicture.BeginAnimation(OpacityProperty,
+            new DoubleAnimation(fadeIn ? 0 : 1, fadeIn ? 1 : 0, duration) { EasingFunction = ease });
+
+        var to = fadeIn ? 1 : 0.965;
+        BigPictureScale.BeginAnimation(ScaleTransform.ScaleXProperty,
+            new DoubleAnimation(to, duration) { EasingFunction = ease });
+        BigPictureScale.BeginAnimation(ScaleTransform.ScaleYProperty,
+            new DoubleAnimation(to, duration) { EasingFunction = ease });
+    }
+
+    private async Task AnimateBigPictureOutAsync()
+    {
+        AnimateBigPicture(fadeIn: false);
+        await Task.Delay(210);
+    }
+
+    private async void TabWall_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key is not (Key.Enter or Key.Space)) return;
+        e.Handled = true;
+        await OpenSelectedAsync();
+    }
+
+    private async void TabWall_Open(object sender, MouseButtonEventArgs e) =>
+        await OpenSelectedAsync();
+
+    private async Task OpenSelectedAsync()
+    {
+        if (_tabs is null || TabWall.SelectedItem is not BrowserTab tab) return;
+        await _tabs.ActivateAsync(tab);
+        await SetBigPictureAsync(false);
+    }
+
+    private async void Window_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        var showing = BigPicture.Visibility == Visibility.Visible;
+
+        switch (e.Key)
+        {
+            case Key.F11:
+                e.Handled = true;
+                await SetBigPictureAsync(!showing);
+                break;
+
+            // Escape belongs to the page unless the wall is up.
+            case Key.Escape when showing:
+                e.Handled = true;
+                await SetBigPictureAsync(false);
+                break;
+        }
     }
 }

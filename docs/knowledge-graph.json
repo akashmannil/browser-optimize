@@ -1,8 +1,8 @@
-﻿{
+{
   "project": "hearth",
   "description": "A low-resource Windows browser shell built on WebView2, whose core bet is that hibernated is a tab's default state and live is a budgeted exception.",
   "schema_version": "1.0",
-  "graph_updated_at_commit": "0006",
+  "graph_updated_at_commit": "0007",
   "consumer_notes": "This file is the authoritative machine-readable model of WHY this codebase is shaped the way it is. Source code records what the system does; this graph records the reasoning, the rejected alternatives, and the constraints that must not be violated. Agents should read this before proposing architectural changes. Every node has a stable `id` that is safe to reference in commits, issues, and other documents. When you add a feature, add its nodes/edges here in the same commit.",
 
   "node_types": {
@@ -344,6 +344,63 @@
       "doc": "docs/commits/0003-live-budget.md"
     },
     {
+      "id": "d.tokenised-theming",
+      "type": "decision",
+      "label": "Every colour is a DynamicResource token, never a literal",
+      "summary": "Light and Dark are two dictionaries with an identical key set, swapped in place at slot 0 of the merged dictionaries. Nothing in the app names a colour directly, so a theme change repaints the whole window without rebuilding any visual tree.",
+      "rationale": "Neutrals are Apple's system greys, requested explicitly. The accent darkens from #E8833A to #C25E14 in light rather than being reused: ember on white fails contrast and reads washed out. A light theme is not an inverted dark theme.",
+      "invariant": "Both dictionaries must expose exactly the same keys. A key present in one and missing from the other resolves to nothing after a swap and paints transparent. Converters must resolve brushes per call rather than caching them, or a swap applies only half-way.",
+      "revisit_if": "A third theme is needed, at which point the key set should be generated rather than hand-maintained."
+    },
+    {
+      "id": "k.custom-chrome-maximise",
+      "type": "constraint",
+      "label": "Custom-chrome windows maximise over the taskbar",
+      "summary": "A WindowStyle=None window maximises to full monitor bounds rather than the work area, covering the taskbar and swallowing whatever sits at the bottom of the layout. Windows asks only once, via WM_GETMINMAXINFO, so the work area has to be supplied in the answer rather than corrected afterwards.",
+      "discovered_in": "0007",
+      "implication": "Removing the native title bar is not free. The first build hid the memory readout behind the taskbar whenever the window was maximised -- the readout that exists specifically to make cost visible.",
+      "workaround": "MaximiseFix hooks WM_GETMINMAXINFO and resolves the monitor per-window rather than assuming the primary, so it stays correct on multi-monitor setups."
+    },
+    {
+      "id": "k.powershell-utf8-corruption",
+      "type": "constraint",
+      "label": "PowerShell 5.1 round-trips corrupt non-ASCII source",
+      "summary": "Get-Content in Windows PowerShell 5.1 decodes BOM-less UTF-8 as ANSI. Reading a source file and writing it back re-encodes every non-ASCII character: an em dash becomes three bytes of mojibake, a middle dot becomes 'A-with-circumflex plus dot'.",
+      "discovered_in": "0007",
+      "implication": "This shipped a visible UI bug -- the Big Picture subtitle rendered as '6 open A. one stays awake'. A blanket Latin-1 to UTF-8 repair then made it worse, because the file held a MIX of correct and doubly-encoded text and box-drawing characters degraded to replacement characters.",
+      "rule": "Edit source with the file-editing tools, never with a PowerShell read-modify-write. Where a C# file must carry punctuation, define it as a named constant so there is one place to check. Keep comment separators ASCII."
+    },
+    {
+      "id": "d.bigpicture-exit-hibernates",
+      "type": "decision",
+      "label": "Leaving Big Picture puts everything else to sleep immediately",
+      "summary": "Exiting the wall calls HibernateAllButActiveAsync, evicting every tab except the one just chosen, regardless of budget headroom.",
+      "rationale": "Leaving the wall is the clearest signal available that the user surveyed everything and picked one thing. Waiting for some later activation to push tabs past the ceiling would be reactive eviction, which is precisely the behaviour c.hibernate-by-default exists to reject.",
+      "synergy": "Combined with Big Picture pinning the budget to 1, the wall is both the cheapest state to sit in and the moment the rest of the session goes cold."
+    },
+    {
+      "id": "cmp.thememanager",
+      "type": "component",
+      "label": "ThemeManager",
+      "file": "src/Hearth/Core/ThemeManager.cs",
+      "summary": "Swaps the token dictionary at runtime and follows the Windows theme via AppsUseLightTheme, watching UserPreferenceChanged. An explicit user choice is never overridden by the OS.",
+      "invariant": "The token dictionary is always slot 0 of MergedDictionaries; it is replaced in place so styles declared after it keep resolving."
+    },
+    {
+      "id": "cmp.maximisefix",
+      "type": "component",
+      "label": "MaximiseFix",
+      "file": "src/Hearth/Views/MaximiseFix.cs",
+      "summary": "Hooks WM_GETMINMAXINFO so a custom-chrome window maximises to the work area instead of over the taskbar. Resolves the monitor per-window for multi-monitor correctness."
+    },
+    {
+      "id": "commit.0007",
+      "type": "commit",
+      "label": "0007 - UI overhaul",
+      "summary": "Native title bar removed and the tab strip became the caption; full light/dark token theming following Windows; animated hover, selection and mode transitions; Big Picture reworked into true fullscreen with lifting cards; exiting it now hibernates everything else.",
+      "doc": "docs/commits/0007-ui-overhaul.md"
+    },
+    {
       "id": "k.wpf-airspace",
       "type": "constraint",
       "label": "WebView2 paints above all WPF content, regardless of Z-order",
@@ -549,7 +606,26 @@
     { "from": "k.wpf-airspace",             "rel": "introduced_in", "to": "commit.0006" },
     { "from": "k.capture-needs-first-paint","rel": "introduced_in", "to": "commit.0006" },
     { "from": "d.bigpicture-is-budget-one", "rel": "introduced_in", "to": "commit.0006" },
-    { "from": "cmp.snapshotconverter",      "rel": "introduced_in", "to": "commit.0006" }
+    { "from": "cmp.snapshotconverter",      "rel": "introduced_in", "to": "commit.0006" },
+
+    { "from": "cmp.thememanager",       "rel": "implements",   "to": "d.tokenised-theming" },
+    { "from": "cmp.mainwindow",         "rel": "depends_on",   "to": "cmp.thememanager" },
+    { "from": "cmp.maximisefix",        "rel": "implements",   "to": "k.custom-chrome-maximise" },
+    { "from": "cmp.mainwindow",         "rel": "depends_on",   "to": "cmp.maximisefix" },
+    { "from": "k.custom-chrome-maximise","rel": "constrains",  "to": "d.dotnet-wpf" },
+    { "from": "k.custom-chrome-maximise","rel": "constrains",  "to": "p.invisible-cost", "note": "The first build hid the memory readout behind the taskbar." },
+    { "from": "k.powershell-utf8-corruption", "rel": "constrains", "to": "cmp.mainwindow" },
+    { "from": "d.bigpicture-exit-hibernates", "rel": "implements",   "to": "c.hibernate-by-default" },
+    { "from": "d.bigpicture-exit-hibernates", "rel": "motivated_by", "to": "d.bigpicture-is-budget-one" },
+    { "from": "d.bigpicture-exit-hibernates", "rel": "depends_on",   "to": "cmp.evictionpolicy" },
+    { "from": "d.tokenised-theming",    "rel": "constrains",   "to": "cmp.snapshotconverter", "note": "Converters resolve brushes per call so a swap does not apply half-way." },
+
+    { "from": "d.tokenised-theming",          "rel": "introduced_in", "to": "commit.0007" },
+    { "from": "cmp.thememanager",             "rel": "introduced_in", "to": "commit.0007" },
+    { "from": "cmp.maximisefix",              "rel": "introduced_in", "to": "commit.0007" },
+    { "from": "k.custom-chrome-maximise",     "rel": "introduced_in", "to": "commit.0007" },
+    { "from": "k.powershell-utf8-corruption", "rel": "introduced_in", "to": "commit.0007" },
+    { "from": "d.bigpicture-exit-hibernates", "rel": "introduced_in", "to": "commit.0007" }
   ]
 }
 

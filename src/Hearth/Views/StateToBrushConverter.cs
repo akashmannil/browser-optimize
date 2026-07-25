@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Windows;
 using System.Windows.Data;
 using System.Windows.Media;
 using Hearth.Core;
@@ -6,34 +7,32 @@ using Hearth.Core;
 namespace Hearth.Views;
 
 /// <summary>
-/// Colours the per-tab state pip. Making renderer cost continuously visible is
-/// a product requirement, not decoration — users cannot reason about a resource
+/// Colours the per-tab heat pip. Making renderer cost continuously visible is a
+/// product requirement, not decoration — users cannot reason about a resource
 /// they never see (p.invisible-cost).
+///
+/// Brushes are resolved from the live theme dictionary on every call rather than
+/// cached, so a theme swap repaints the pips along with everything else. A
+/// converter that caches brushes is the classic way a theme switch ends up
+/// half-applied.
 /// </summary>
 public sealed class StateToBrushConverter : IValueConverter
 {
-    private static readonly SolidColorBrush LiveBrush       = Freeze("#E8833A"); // holds a renderer
-    private static readonly SolidColorBrush WarmBrush       = Freeze("#B7791F");
-    private static readonly SolidColorBrush HibernatedBrush = Freeze("#4A7FB5");
-    private static readonly SolidColorBrush ColdBrush       = Freeze("#4A4D53"); // costs nothing
-
-    private static SolidColorBrush Freeze(string hex)
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
     {
-        var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex));
-        brush.Freeze();
-        return brush;
-    }
-
-    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
-        value is TabState state
+        var key = value is TabState state
             ? state switch
             {
-                TabState.Live => LiveBrush,
-                TabState.Warm => WarmBrush,
-                TabState.Hibernated => HibernatedBrush,
-                _ => ColdBrush
+                TabState.Live => "StateLive",
+                TabState.Warm => "StateWarm",
+                TabState.Hibernated => "StateHibernated",
+                _ => "StateCold"
             }
-            : ColdBrush;
+            : "StateCold";
+
+        return Application.Current?.TryFindResource(key) as Brush
+               ?? Brushes.Gray;
+    }
 
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
         throw new NotSupportedException();

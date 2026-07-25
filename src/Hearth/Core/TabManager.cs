@@ -105,6 +105,32 @@ public sealed class TabManager
     }
 
     /// <summary>
+    /// Puts every tab except the active one to sleep, regardless of budget.
+    ///
+    /// Called on the way OUT of Big Picture. Leaving the wall is the clearest
+    /// signal the user has finished surveying and picked one thing, so the rest
+    /// should go cold rather than linger until some later activation happens to
+    /// push them past the ceiling. Eviction that waits for pressure is the
+    /// reactive behaviour this project exists to avoid (c.hibernate-by-default).
+    /// </summary>
+    public async Task HibernateAllButActiveAsync()
+    {
+        await _budgetGate.WaitAsync();
+        try
+        {
+            var now = DateTime.UtcNow;
+            foreach (var tab in EvictionPolicy.EvictionOrder(_tabs, Active, now).ToList())
+                await HibernateAsync(tab);
+        }
+        finally
+        {
+            _budgetGate.Release();
+        }
+
+        Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
     /// Engages or releases low-power mode. Content filtering only affects
     /// requests made from now on, so the active tab is reloaded to give the
     /// change an immediate, visible effect rather than one that arrives
