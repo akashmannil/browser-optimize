@@ -31,8 +31,21 @@ Hearth attacks both halves: make eviction imperceptible, and make the cost visib
 Early. Built commit by commit, each with a design note in [`docs/commits/`](docs/commits/).
 
 | Commit | What landed |
-|---|---|
+| --- | --- |
 | [`0001`](docs/commits/0001-scaffold.md) | Repo, WPF + WebView2 shell, shared environment, docs + knowledge graph |
+| [`0002`](docs/commits/0002-tab-model.md) | Tab model, tab strip, `TabManager` owns the environment; baseline measured |
+
+### Measured baseline (commit `0002`, before any eviction exists)
+
+| Tabs | Browser processes | Renderers | Total working set |
+| ---: | ---: | ---: | ---: |
+| 1 | 1 | 1 | 304.5 MB |
+| 5 | **1** | **14** | 1170.3 MB |
+
+One browser process across five tabs confirms the shared-environment invariant. But fourteen
+renderers for five tabs is Chromium **site isolation** allocating a renderer per cross-origin
+iframe — so capping live *tabs* does not cap *renderers*. At ~234 MB/tab this currently
+extrapolates worse than Chrome. Flattening that curve is the entire point of the next commits.
 
 ## Requirements
 

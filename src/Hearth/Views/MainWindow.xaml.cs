@@ -1,7 +1,8 @@
-using System.IO;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
-using Microsoft.Web.WebView2.Core;
+using System.Windows.Media;
+using Hearth.Core;
 
 namespace Hearth.Views;
 
@@ -9,7 +10,7 @@ public partial class MainWindow : Window
 {
     private const string HomeUrl = "https://example.com";
 
-    private CoreWebView2Environment? _environment;
+    private TabManager? _tabs;
 
     public MainWindow()
     {
@@ -19,55 +20,64 @@ public partial class MainWindow : Window
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
-        // A single explicitly-created environment is the cornerstone of the whole
-        // design: every WebView2 created from one environment shares ONE browser
-        // process. Letting each control create its own (the default) would spawn a
-        // browser process per tab and defeat the memory budget before it exists.
-        var userDataFolder = Path.Combine(App.StoreRoot, "webview2");
-        Directory.CreateDirectory(userDataFolder);
+        _tabs = new TabManager(ContentHost);
+        _tabs.Changed += (_, _) => Dispatcher.Invoke(Sync);
 
-        _environment = await CoreWebView2Environment.CreateAsync(
-            browserExecutableFolder: null,
-            userDataFolder: userDataFolder);
+        TabStrip.ItemsSource = _tabs.Tabs;
 
-        await Browser.EnsureCoreWebView2Async(_environment);
-
-        Browser.CoreWebView2.DocumentTitleChanged += (_, _) => UpdateStatus();
-        Browser.CoreWebView2.SourceChanged += (_, _) =>
+        // Startup URLs may be passed on the command line, which is ordinary
+        // browser behaviour and — more usefully here — makes memory runs at a
+        // given tab count reproducible without hand-clicking the strip.
+        var startup = Environment.GetCommandLineArgs().Skip(1).ToArray();
+        if (startup.Length == 0)
         {
-            AddressBar.Text = Browser.CoreWebView2.Source;
-            UpdateStatus();
-        };
+            _tabs.Open(HomeUrl);
+        }
+        else
+        {
+            // Only the last becomes active; the rest stay Cold until visited,
+            // which is the default-state inversion doing its job.
+            for (var i = 0; i < startup.Length; i++)
+                _tabs.Open(startup[i], activate: i == startup.Length - 1);
+        }
 
-        AddressBar.Text = HomeUrl;
-        Browser.CoreWebView2.Navigate(HomeUrl);
-        UpdateStatus();
+        // Surfacing the runtime version proves the shared environment resolved.
+        var version = await _tabs.GetRuntimeVersionAsync();
+        Title = $"Hearth — WebView2 {version}";
+        Sync();
     }
 
-    private void UpdateStatus()
+    /// <summary>Pulls window chrome back in line with tab-manager state.</summary>
+    private void Sync()
     {
-        if (_environment is null) return;
+        if (_tabs is null) return;
 
-        var title = Browser.CoreWebView2?.DocumentTitle;
+        var active = _tabs.Active;
+        if (active is not null && !AddressBar.IsFocused)
+            AddressBar.Text = active.Url;
+
+        // Live count is the number the budget in commit 0003 will cap. Showing it
+        // now, before it is enforced, gives a baseline to compare against.
         StatusText.Text =
-            $"Runtime {_environment.BrowserVersionString}  ·  1 live tab  ·  {title}";
+            $"{_tabs.Tabs.Count} tabs  ·  {_tabs.LiveCount} live  ·  " +
+            $"{active?.Title ?? "—"}";
     }
 
     private void Navigate()
     {
-        if (Browser.CoreWebView2 is null) return;
+        if (_tabs?.Active is not { } active) return;
 
         var raw = AddressBar.Text.Trim();
         if (raw.Length == 0) return;
 
-        // Anything without a scheme that also lacks a dot is treated as a search.
+        // No scheme and no dot means the user typed a query, not an address.
         var url = raw.Contains("://")
             ? raw
             : raw.Contains('.') && !raw.Contains(' ')
                 ? "https://" + raw
                 : "https://duckduckgo.com/?q=" + Uri.EscapeDataString(raw);
 
-        Browser.CoreWebView2.Navigate(url);
+        _tabs.Navigate(active, url);
     }
 
     private void GoButton_Click(object sender, RoutedEventArgs e) => Navigate();
@@ -75,5 +85,40 @@ public partial class MainWindow : Window
     private void AddressBar_KeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key == Key.Enter) Navigate();
+    }
+
+    private void NewTab_Click(object sender, RoutedEventArgs e)
+    {
+        _tabs?.Open(HomeUrl);
+        AddressBar.Focus();
+        AddressBar.SelectAll();
+    }
+
+    private void CloseTab_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: BrowserTab tab }) _tabs?.Close(tab);
+        e.Handled = true;
+    }
+
+    private void TabStrip_Click(object sender, MouseButtonEventArgs e)
+    {
+        // The close button handles its own click and marks it handled, so
+        // anything reaching here is a request to activate the chip.
+        if (e.OriginalSource is not DependencyObject source) return;
+
+        var container = FindAncestorItem(source);
+        if (container?.DataContext is BrowserTab tab) _ = _tabs?.ActivateAsync(tab);
+    }
+
+    private static FrameworkElement? FindAncestorItem(DependencyObject source)
+    {
+        while (source is not null)
+        {
+            if (source is FrameworkElement { DataContext: BrowserTab } element)
+                return element;
+
+            source = VisualTreeHelper.GetParent(source);
+        }
+        return null;
     }
 }

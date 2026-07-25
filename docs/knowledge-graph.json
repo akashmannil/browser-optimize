@@ -2,7 +2,7 @@
   "project": "hearth",
   "description": "A low-resource Windows browser shell built on WebView2, whose core bet is that hibernated is a tab's default state and live is a budgeted exception.",
   "schema_version": "1.0",
-  "graph_updated_at_commit": "0001",
+  "graph_updated_at_commit": "0002",
   "consumer_notes": "This file is the authoritative machine-readable model of WHY this codebase is shaped the way it is. Source code records what the system does; this graph records the reasoning, the rejected alternatives, and the constraints that must not be violated. Agents should read this before proposing architectural changes. Every node has a stable `id` that is safe to reference in commits, issues, and other documents. When you add a feature, add its nodes/edges here in the same commit.",
 
   "node_types": {
@@ -140,6 +140,23 @@
     },
 
     {
+      "id": "k.site-isolation-multiplies-renderers",
+      "type": "constraint",
+      "label": "Renderer count exceeds tab count because of site isolation",
+      "summary": "WebView2 inherits Chromium site isolation, which allocates a renderer per site instance INCLUDING cross-origin iframes. Measured at commit 0002: 5 tabs (example.com, wikipedia, HN, github, stackoverflow) produced 14 renderer processes and 1170 MB total working set, roughly 234 MB per tab.",
+      "discovered_in": "0002",
+      "implication": "A shared environment guarantees one BROWSER process, not one renderer per tab. Capping live tabs alone does not cap renderers; ad-heavy or widget-heavy pages fan out. This makes eviction MORE valuable than the original 40-80 MB per-tab estimate implied, not less.",
+      "known_lever": "CoreWebView2EnvironmentOptions.AdditionalBrowserArguments can pass --renderer-process-limit=N, which forces Chromium to multiplex site instances onto a capped renderer pool, in the spirit of Firefox's dom.ipc.processCount. Untested here as of 0002; evaluated in 0003.",
+      "tradeoff": "Capping renderers weakens site isolation, the mitigation for Spectre-class cross-origin attacks, and makes one renderer crash take down more tabs."
+    },
+    {
+      "id": "api.additional-browser-arguments",
+      "type": "api",
+      "label": "CoreWebView2EnvironmentOptions.AdditionalBrowserArguments",
+      "summary": "Passes raw Chromium command-line switches to the browser process at environment-creation time. The only route to process-model control from an embedder, and therefore the only lever on k.site-isolation-multiplies-renderers.",
+      "docs": "https://learn.microsoft.com/dotnet/api/microsoft.web.webview2.core.corewebview2environmentoptions.additionalbrowserarguments"
+    },
+    {
       "id": "api.trysuspend",
       "type": "api",
       "label": "CoreWebView2.TrySuspend()",
@@ -166,7 +183,14 @@
       "type": "metric",
       "label": "Steady-state working set at high tab count",
       "summary": "Target: total working set stays flat as tab count grows. Reference points: Chrome at 100 tabs is 6-10 GB, Firefox 2-4 GB. Hearth target is under 1.5 GB regardless of tab count.",
-      "status": "not-yet-measured"
+      "status": "baseline-measured",
+      "baseline_0002": {
+        "note": "Measured BEFORE any budget or eviction exists. This is the number the project has to beat, not a result.",
+        "1_tab": { "total_working_set_mb": 304.5, "renderers": 1, "browser_processes": 1 },
+        "5_tabs": { "total_working_set_mb": 1170.3, "renderers": 14, "browser_processes": 1 },
+        "implied_per_tab_mb": 234,
+        "interpretation": "Growth is roughly linear and steep. Naive linear extrapolation to 100 tabs is over 20 GB, i.e. currently WORSE than Chrome. The entire value of the project is in flattening this curve."
+      }
     },
     {
       "id": "m.restore-fidelity",
@@ -199,11 +223,41 @@
     },
 
     {
+      "id": "cmp.tabstate",
+      "type": "component",
+      "label": "TabState",
+      "file": "src/Hearth/Core/TabState.cs",
+      "summary": "Four-state lifecycle enum (Live, Warm, Hibernated, Cold). Ordered so that a higher value means cheaper to hold and slower to restore; eviction always moves a tab to a higher value."
+    },
+    {
+      "id": "cmp.browsertab",
+      "type": "component",
+      "label": "BrowserTab",
+      "file": "src/Hearth/Core/BrowserTab.cs",
+      "summary": "A tab's durable identity: URL, title, activation history. Deliberately NOT a WebView2 wrapper — the View property is nullable and null is the expected steady state. Carries LastActivatedUtc and ActivationCount to drive eviction ordering.",
+      "invariant": "Null View must never be treated as an error condition. Tabs are documents; renderers are a cache."
+    },
+    {
+      "id": "cmp.tabmanager",
+      "type": "component",
+      "label": "TabManager",
+      "file": "src/Hearth/Core/TabManager.cs",
+      "summary": "Owns tab lifetime and the single shared CoreWebView2Environment. Holds the environment as a Task awaited by every realisation, so tabs share one initialisation instead of racing to create their own.",
+      "invariant": "RealiseAsync is the ONLY place permitted to call EnsureCoreWebView2Async, and it always passes the shared environment."
+    },
+    {
       "id": "commit.0001",
       "type": "commit",
       "label": "0001 - scaffold",
       "summary": "Repo initialised, WPF + WebView2 shell builds and navigates, documentation and knowledge-graph structure established.",
       "doc": "docs/commits/0001-scaffold.md"
+    },
+    {
+      "id": "commit.0002",
+      "type": "commit",
+      "label": "0002 - tab model",
+      "summary": "Tab abstraction and TabManager introduced; environment ownership moved out of the window. Verified one browser process across 5 tabs, and discovered site isolation multiplies renderers well beyond tab count.",
+      "doc": "docs/commits/0002-tab-model.md"
     }
   ],
 
@@ -236,6 +290,24 @@
     { "from": "d.dotnet-wpf",          "rel": "implements",             "to": "d.webview2-shell" },
 
     { "from": "cmp.app",               "rel": "introduced_in",          "to": "commit.0001" },
-    { "from": "cmp.mainwindow",        "rel": "introduced_in",          "to": "commit.0001" }
+    { "from": "cmp.mainwindow",        "rel": "introduced_in",          "to": "commit.0001" },
+
+    { "from": "cmp.tabmanager",        "rel": "implements",             "to": "d.shared-environment", "note": "Supersedes MainWindow as the environment owner." },
+    { "from": "cmp.tabmanager",        "rel": "supersedes",             "to": "cmp.mainwindow",       "note": "For environment ownership only; MainWindow remains the shell." },
+    { "from": "cmp.tabmanager",        "rel": "depends_on",             "to": "cmp.browsertab" },
+    { "from": "cmp.browsertab",        "rel": "depends_on",             "to": "cmp.tabstate" },
+    { "from": "cmp.browsertab",        "rel": "implements",             "to": "c.hibernate-by-default", "note": "Nullable View encodes 'a tab is a document, a renderer is a cache'." },
+    { "from": "cmp.tabstate",          "rel": "implements",             "to": "c.hibernate-by-default" },
+
+    { "from": "k.site-isolation-multiplies-renderers", "rel": "constrains", "to": "d.shared-environment", "note": "A shared environment guarantees one BROWSER process, not one renderer per tab." },
+    { "from": "k.site-isolation-multiplies-renderers", "rel": "constrains", "to": "m.steady-state-ceiling" },
+    { "from": "k.site-isolation-multiplies-renderers", "rel": "motivated_by", "to": "c.process-overhead-dominates" },
+    { "from": "api.additional-browser-arguments",      "rel": "constrains", "to": "k.site-isolation-multiplies-renderers", "note": "--renderer-process-limit is the only embedder-side lever." },
+    { "from": "d.webview2-shell",      "rel": "depends_on",             "to": "api.additional-browser-arguments" },
+
+    { "from": "cmp.tabstate",          "rel": "introduced_in",          "to": "commit.0002" },
+    { "from": "cmp.browsertab",        "rel": "introduced_in",          "to": "commit.0002" },
+    { "from": "cmp.tabmanager",        "rel": "introduced_in",          "to": "commit.0002" },
+    { "from": "k.site-isolation-multiplies-renderers", "rel": "introduced_in", "to": "commit.0002" }
   ]
 }

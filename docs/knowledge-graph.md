@@ -59,12 +59,14 @@ graph LR
     K2["k.widevine-drm"]
     K3["k.windows-only"]
     K4["k.capture-requires-live"]
+    K5["k.site-isolation-multiplies-renderers<br/>5 tabs = 14 renderers"]
   end
 
   subgraph WEBVIEW2_APIS
     A1["api.trysuspend"]
     A2["api.capturepreview"]
     A3["api.memory-target-level"]
+    A4["api.additional-browser-arguments<br/>--renderer-process-limit"]
   end
 
   subgraph METRICS
@@ -91,6 +93,12 @@ graph LR
   D3 -.implements.-> C2
   K4 -.constrains.-> A2
 
+  D1 --> A4
+  K5 -.constrains.-> D3
+  K5 -.constrains.-> M1
+  A4 -.only lever on.-> K5
+  C1 --> K5
+
   C2 -.measured by.-> M1
   C2 -.measured by.-> M2
   P2 -.measured by.-> M3
@@ -102,28 +110,54 @@ graph LR
   style K2 fill:#742a2a,stroke:#4a1a1a,color:#fff
   style K3 fill:#742a2a,stroke:#4a1a1a,color:#fff
   style K4 fill:#742a2a,stroke:#4a1a1a,color:#fff
+  style K5 fill:#742a2a,stroke:#4a1a1a,color:#fff
 ```
+
+## Measured baseline (commit `0002`)
+
+Taken **before** any budget or eviction exists — this is the curve the project has to flatten,
+not a result.
+
+| Tabs | Browser processes | Renderers | Total working set |
+| ---: | ---: | ---: | ---: |
+| 1 | 1 | 1 | 304.5 MB |
+| 5 | 1 | **14** | 1170.3 MB |
+
+The browser-process count staying at 1 confirms `d.shared-environment`. The renderer count
+outrunning the tab count 14:5 is `k.site-isolation-multiplies-renderers` — cross-origin iframes
+each get their own renderer. At ~234 MB/tab, naive extrapolation to 100 tabs exceeds 20 GB, which
+is currently *worse* than Chrome.
 
 ## Component map
 
 ```mermaid
 graph TD
   APP["cmp.app<br/>App.xaml.cs<br/>owns StoreRoot"]
-  MW["cmp.mainwindow<br/>Views/MainWindow.xaml.cs<br/>shell + shared environment"]
+  MW["cmp.mainwindow<br/>Views/MainWindow.xaml.cs<br/>shell + tab strip"]
+  TM["cmp.tabmanager<br/>Core/TabManager.cs<br/>OWNS shared environment"]
+  BT["cmp.browsertab<br/>Core/BrowserTab.cs<br/>durable tab identity"]
+  TS["cmp.tabstate<br/>Core/TabState.cs<br/>Live/Warm/Hibernated/Cold"]
 
-  MW --> APP
+  MW --> TM
+  TM --> APP
+  TM --> BT
+  BT --> TS
 
   style APP fill:#2B2D31,stroke:#8A8D93,color:#E3E3E3
-  style MW fill:#2B2D31,stroke:#8A8D93,color:#E3E3E3
+  style MW  fill:#2B2D31,stroke:#8A8D93,color:#E3E3E3
+  style TM  fill:#2B6CB0,stroke:#1a4a7a,color:#fff
+  style BT  fill:#2B2D31,stroke:#8A8D93,color:#E3E3E3
+  style TS  fill:#2B2D31,stroke:#8A8D93,color:#E3E3E3
 ```
 
-*The component map is deliberately small at commit `0001`. It grows with each commit; the
-tab-lifecycle components arrive in `0002`–`0004`.*
+`TabManager` is highlighted because it holds the `d.shared-environment` invariant: it is the only
+component permitted to call `EnsureCoreWebView2Async`, and it always passes the one environment it
+owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 
 ## Node index
 
 | id | type | one-line |
-|---|---|---|
+| --- | --- | --- |
 | `p.tab-hoarding` | problem | Refusing to close tabs is rational, not user error |
 | `p.invisible-cost` | problem | Users feel slowness but don't attribute it to the browser |
 | `p.lossy-restore` | problem | Lossy restore makes users disable suspenders |
@@ -140,9 +174,14 @@ tab-lifecycle components arrive in `0002`–`0004`.*
 | `k.widevine-drm` | constraint | DRM needs a licence, not code |
 | `k.windows-only` | constraint | WebView2 is Windows-only in practice |
 | `k.capture-requires-live` | constraint | Screenshot on blur, never after evict |
+| `k.site-isolation-multiplies-renderers` | constraint | 5 tabs produced 14 renderers; capping tabs ≠ capping renderers |
 | `api.trysuspend` | api | Hibernation tier 1 |
 | `api.capturepreview` | api | Visual placeholder source |
 | `api.memory-target-level` | api | Cheap intermediate tier |
+| `api.additional-browser-arguments` | api | Only embedder lever on the process model |
+| `cmp.tabmanager` | component | Owns the shared environment — the load-bearing invariant |
+| `cmp.browsertab` | component | Tab identity that outlives its renderer |
+| `cmp.tabstate` | component | Four-state lifecycle enum |
 | `m.steady-state-ceiling` | metric | Flat working set as tabs grow |
 | `m.restore-fidelity` | metric | Users must not feel eviction |
 | `m.reclaim-delta` | metric | Bytes returned per eviction |
