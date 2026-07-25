@@ -1,0 +1,34 @@
+# Build output
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+*.user
+*.suo
+
+# .NET
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# Visual Studio
+.vs/
+*.VC.db
+*.opendb
+
+# Rider
+.idea/
+
+# WebView2 user data folders (browser profiles, caches, hibernation store)
+UserData/
+*.WebView2/
+
+# Hearth runtime artifacts
+/store/
+*.hearth-session
+
+# OS
+Thumbs.db
+desktop.ini

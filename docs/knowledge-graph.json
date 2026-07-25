@@ -1,0 +1,241 @@
+{
+  "project": "hearth",
+  "description": "A low-resource Windows browser shell built on WebView2, whose core bet is that hibernated is a tab's default state and live is a budgeted exception.",
+  "schema_version": "1.0",
+  "graph_updated_at_commit": "0001",
+  "consumer_notes": "This file is the authoritative machine-readable model of WHY this codebase is shaped the way it is. Source code records what the system does; this graph records the reasoning, the rejected alternatives, and the constraints that must not be violated. Agents should read this before proposing architectural changes. Every node has a stable `id` that is safe to reference in commits, issues, and other documents. When you add a feature, add its nodes/edges here in the same commit.",
+
+  "node_types": {
+    "problem": "An observed user-facing or system-level problem the project exists to solve.",
+    "concept": "A domain idea or mental model used to reason about the system.",
+    "decision": "An architectural choice that was actively made, with alternatives that were rejected.",
+    "constraint": "A hard limit imposed by a platform, API, licence, or law of physics. Cannot be designed away.",
+    "component": "A concrete code artifact (class, module, file) in this repository.",
+    "api": "An external platform API the design depends on.",
+    "metric": "A measurable quantity used to validate the design.",
+    "commit": "A unit of work in this repository's history."
+  },
+
+  "edge_types": {
+    "motivated_by": "Source exists because of target.",
+    "implements": "Source is the concrete realisation of target.",
+    "depends_on": "Source cannot function without target.",
+    "constrains": "Source limits the design space of target.",
+    "rejected_in_favour_of": "Source was an alternative that lost to target.",
+    "measured_by": "Source's success is validated by target.",
+    "introduced_in": "Source first appeared in target commit.",
+    "supersedes": "Source replaces target."
+  },
+
+  "nodes": [
+    {
+      "id": "p.tab-hoarding",
+      "type": "problem",
+      "label": "Users hoard tabs and will not close them",
+      "summary": "People keep 100-500 tabs open because the tab strip is the only place where 'things I still care about' remain visible. Refusing to close is a rational response to untrustworthy retrieval, not user error."
+    },
+    {
+      "id": "p.invisible-cost",
+      "type": "problem",
+      "label": "The RAM cost of tabs is invisible to users",
+      "summary": "Users experience the symptom (a slow machine) but do not attribute it to the browser. Because the cost is never made legible, there is no pressure to change behaviour."
+    },
+    {
+      "id": "p.lossy-restore",
+      "type": "problem",
+      "label": "Existing tab suspenders restore lossily",
+      "summary": "Chrome Memory Saver, The Great Suspender and similar tools lose scroll position, form state and media timestamps on restore. The papercut causes users to disable the feature, so the memory is never actually reclaimed."
+    },
+    {
+      "id": "p.archive-blackhole",
+      "type": "problem",
+      "label": "Tab archivers become graveyards",
+      "summary": "OneTab, Session Buddy and Toby convert a visible anxious pile into an invisible list nobody revisits. Users intuit this and resist adoption, correctly."
+    },
+
+    {
+      "id": "c.process-overhead-dominates",
+      "type": "concept",
+      "label": "Per-renderer baseline dominates browser memory",
+      "summary": "A Chromium renderer costs roughly 40-80 MB for a blank page (V8 isolate, Blink, Mojo, sandbox) before any content loads. At 100 tabs that is ~6 GB of pure overhead. Tab COUNT, not page weight, is the primary cost driver.",
+      "implication": "Any memory strategy that does not reduce the number of live renderers is treating a symptom."
+    },
+    {
+      "id": "c.tab-taxonomy",
+      "type": "concept",
+      "label": "A tab strip holds five different data types",
+      "summary": "Active work, a todo, a reference doc, a read-later item, and a fear-of-loss artifact all wear the same UI costume. Applying one lifecycle policy to all five is why every existing tool fails."
+    },
+    {
+      "id": "c.refindability",
+      "type": "concept",
+      "label": "Refindability score",
+      "summary": "How hard a tab would be to recover if closed. A homepage or Wikipedia article is trivially refindable; a filtered dashboard view, a deep search result, or a half-filled form is not. Aggressive eviction is acceptable only for trivially refindable tabs.",
+      "status": "planned"
+    },
+    {
+      "id": "c.ram-for-disk-trade",
+      "type": "concept",
+      "label": "Trade RAM for disk at ~200:1",
+      "summary": "A hibernated tab costs a WebP screenshot plus serialised state, roughly 150 KB on disk, versus 40-80 MB of RAM live. 200 hibernated tabs fit in ~40 MB of disk."
+    },
+    {
+      "id": "c.hibernate-by-default",
+      "type": "concept",
+      "label": "Hibernated is the default state, live is the exception",
+      "summary": "Every other browser treats loaded as default and unloading as an emergency. Chrome Memory Saver and Firefox tab unloading are REACTIVE, triggering only under memory pressure. Hearth inverts this: tabs are documents on disk that get temporarily instantiated, under a hard budget.",
+      "is_core_thesis": true
+    },
+
+    {
+      "id": "d.webview2-shell",
+      "type": "decision",
+      "label": "Build a shell on WebView2 rather than fork an engine",
+      "summary": "WebView2 provides the modern web for free and natively exposes the exact primitives this architecture needs: TrySuspend/Resume, CapturePreview, and MemoryUsageTargetLevel. A Gecko fork would give deeper process-model control but costs months before the UX thesis can be tested at all.",
+      "rationale": "De-risk the product thesis on the cheap substrate first. If screenshot-backed restore does not feel convincing here, a Gecko fork inherits the same failure.",
+      "revisit_if": "Shell-level control proves insufficient to hold a hard memory ceiling, or cross-platform support becomes a requirement."
+    },
+    {
+      "id": "d.dotnet-wpf",
+      "type": "decision",
+      "label": "C# / .NET 9 / WPF as the host framework",
+      "summary": "WPF is the most mature WebView2 host, builds from the CLI without MSIX packaging friction, and allows direct control over individual CoreWebView2Controller lifetimes.",
+      "rationale": "Chosen partly by environment: .NET 9 SDK and VS 2022 present, no Rust toolchain installed. WinUI3 was rejected for packaging friction."
+    },
+    {
+      "id": "d.shared-environment",
+      "type": "decision",
+      "label": "One shared CoreWebView2Environment for all tabs",
+      "summary": "Every WebView2 created from a single environment shares ONE browser process. Allowing each control to create its own environment (the default) spawns a browser process per tab and destroys the memory budget before it exists.",
+      "rationale": "This is the single highest-leverage line of code in the project.",
+      "invariant": "Never call EnsureCoreWebView2Async without passing the shared environment."
+    },
+
+    {
+      "id": "k.no-per-tab-memory-api",
+      "type": "constraint",
+      "label": "No per-tab memory API is exposed",
+      "summary": "Neither WebView2 nor Chromium exposes per-renderer memory to embedders. Per-tab cost must be inferred by measuring the reclaim delta across a suspend/resume cycle, or by attributing OS process working sets.",
+      "workaround": "Measure system-wide working set of the WebView2 process tree before and after eviction; attribute the delta to the evicted tab. Self-calibrating over time."
+    },
+    {
+      "id": "k.widevine-drm",
+      "type": "constraint",
+      "label": "Widevine DRM requires a licence agreement",
+      "summary": "Netflix, Spotify and Prime need Widevine. WebView2 inherits Edge's Widevine support, but a shipped product needs a licence relationship with Google. Not a coding problem.",
+      "severity": "blocks-commercial-release"
+    },
+    {
+      "id": "k.windows-only",
+      "type": "constraint",
+      "label": "WebView2 is Windows-only in practice",
+      "summary": "WebView2 targets Windows. Cross-platform would require CEF, Tauri's wry, or a per-OS webview abstraction."
+    },
+    {
+      "id": "k.capture-requires-live",
+      "type": "constraint",
+      "label": "CapturePreview requires a live, realised WebView2",
+      "summary": "A screenshot can only be taken while the WebView2 still exists and has rendered. The capture must therefore happen at tab-BLUR, immediately before eviction, never after.",
+      "implication": "A tab restored from a cold session has no screenshot until it has been live once."
+    },
+
+    {
+      "id": "api.trysuspend",
+      "type": "api",
+      "label": "CoreWebView2.TrySuspend()",
+      "summary": "Suspends a WebView2, freeing significant renderer memory while keeping the controller alive for fast resume. Requires the controller to be invisible first. This is hibernation tier 1.",
+      "docs": "https://learn.microsoft.com/dotnet/api/microsoft.web.webview2.core.corewebview2.trysuspend"
+    },
+    {
+      "id": "api.capturepreview",
+      "type": "api",
+      "label": "CoreWebView2.CapturePreviewAsync()",
+      "summary": "Captures the visible content of a WebView2 to a PNG or JPEG stream. Used to produce the visual placeholder that makes an evicted tab indistinguishable from a live one.",
+      "docs": "https://learn.microsoft.com/dotnet/api/microsoft.web.webview2.core.corewebview2.capturepreviewasync"
+    },
+    {
+      "id": "api.memory-target-level",
+      "type": "api",
+      "label": "CoreWebView2.MemoryUsageTargetLevel",
+      "summary": "Hints to the runtime that a WebView2 should minimise memory usage. Cheaper and lower-fidelity than TrySuspend; usable as an intermediate tier for recently-blurred tabs.",
+      "docs": "https://learn.microsoft.com/dotnet/api/microsoft.web.webview2.core.corewebview2.memoryusagetargetlevel"
+    },
+
+    {
+      "id": "m.steady-state-ceiling",
+      "type": "metric",
+      "label": "Steady-state working set at high tab count",
+      "summary": "Target: total working set stays flat as tab count grows. Reference points: Chrome at 100 tabs is 6-10 GB, Firefox 2-4 GB. Hearth target is under 1.5 GB regardless of tab count.",
+      "status": "not-yet-measured"
+    },
+    {
+      "id": "m.restore-fidelity",
+      "type": "metric",
+      "label": "Restore fidelity",
+      "summary": "Whether a rehydrated tab returns to the same scroll offset, form state and media position. The product thesis fails if users can feel eviction happening.",
+      "status": "not-yet-measured"
+    },
+    {
+      "id": "m.reclaim-delta",
+      "type": "metric",
+      "label": "Memory reclaimed per eviction",
+      "summary": "Working-set bytes returned to the OS by evicting one tab. Doubles as the per-tab cost estimate that makes the invisible cost legible to users.",
+      "status": "not-yet-measured"
+    },
+
+    {
+      "id": "cmp.app",
+      "type": "component",
+      "label": "App / StoreRoot",
+      "file": "src/Hearth/App.xaml.cs",
+      "summary": "Application entry point. Owns StoreRoot, the single on-disk location for the WebView2 user-data folder, hibernation screenshots and the session index."
+    },
+    {
+      "id": "cmp.mainwindow",
+      "type": "component",
+      "label": "MainWindow",
+      "file": "src/Hearth/Views/MainWindow.xaml.cs",
+      "summary": "Application shell. At commit 0001 it hosts a single WebView2 and creates the shared environment, proving the toolchain. Becomes the tab-strip host in later commits."
+    },
+
+    {
+      "id": "commit.0001",
+      "type": "commit",
+      "label": "0001 - scaffold",
+      "summary": "Repo initialised, WPF + WebView2 shell builds and navigates, documentation and knowledge-graph structure established.",
+      "doc": "docs/commits/0001-scaffold.md"
+    }
+  ],
+
+  "edges": [
+    { "from": "p.tab-hoarding",        "rel": "motivated_by",           "to": "p.archive-blackhole",       "note": "Users resist archiving precisely because archives are not trustworthy retrieval." },
+    { "from": "c.hibernate-by-default","rel": "motivated_by",           "to": "p.tab-hoarding" },
+    { "from": "c.hibernate-by-default","rel": "motivated_by",           "to": "c.process-overhead-dominates" },
+    { "from": "c.hibernate-by-default","rel": "depends_on",             "to": "c.ram-for-disk-trade" },
+    { "from": "c.hibernate-by-default","rel": "measured_by",            "to": "m.steady-state-ceiling" },
+    { "from": "c.hibernate-by-default","rel": "measured_by",            "to": "m.restore-fidelity" },
+
+    { "from": "p.lossy-restore",       "rel": "constrains",             "to": "c.hibernate-by-default",    "note": "Eviction is only acceptable if restore is indistinguishable from never having left." },
+    { "from": "k.capture-requires-live","rel": "constrains",            "to": "api.capturepreview" },
+
+    { "from": "d.webview2-shell",      "rel": "motivated_by",           "to": "c.hibernate-by-default" },
+    { "from": "d.webview2-shell",      "rel": "depends_on",             "to": "api.trysuspend" },
+    { "from": "d.webview2-shell",      "rel": "depends_on",             "to": "api.capturepreview" },
+    { "from": "d.webview2-shell",      "rel": "depends_on",             "to": "api.memory-target-level" },
+    { "from": "k.windows-only",        "rel": "constrains",             "to": "d.webview2-shell" },
+    { "from": "k.widevine-drm",        "rel": "constrains",             "to": "d.webview2-shell" },
+
+    { "from": "d.shared-environment",  "rel": "motivated_by",           "to": "c.process-overhead-dominates" },
+    { "from": "d.shared-environment",  "rel": "implements",             "to": "c.hibernate-by-default" },
+    { "from": "cmp.mainwindow",        "rel": "implements",             "to": "d.shared-environment" },
+    { "from": "cmp.mainwindow",        "rel": "depends_on",             "to": "cmp.app" },
+
+    { "from": "k.no-per-tab-memory-api","rel": "constrains",            "to": "m.reclaim-delta" },
+    { "from": "p.invisible-cost",      "rel": "measured_by",            "to": "m.reclaim-delta" },
+
+    { "from": "d.dotnet-wpf",          "rel": "implements",             "to": "d.webview2-shell" },
+
+    { "from": "cmp.app",               "rel": "introduced_in",          "to": "commit.0001" },
+    { "from": "cmp.mainwindow",        "rel": "introduced_in",          "to": "commit.0001" }
+  ]
+}
