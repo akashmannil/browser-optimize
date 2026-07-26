@@ -314,7 +314,7 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 
 <!-- GENERATED: node index below is rebuilt from knowledge-graph.json. -->
 
-**78 nodes, 172 edges**, current to commit `0009`. This table is generated from the JSON; edit the JSON, never this table.
+**83 nodes, 185 edges**, current to commit `0010`. This table is generated from the JSON; edit the JSON, never this table.
 
 ### Problems (4)
 
@@ -335,7 +335,7 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 | `c.ram-for-disk-trade` | Disk cost is effectively free at any realistic tab count. 1,000 hibernated tabs would occupy roughly 27 MB. There is no reason to ration snapshots or... |
 | `c.hibernate-by-default` **[core thesis]** | Every other browser treats loaded as default and unloading as an emergency. Chrome Memory Saver and Firefox tab unloading are REACTIVE, triggering... |
 
-### Decisions (15)
+### Decisions (18)
 
 | id | one-line |
 | --- | --- |
@@ -354,8 +354,11 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 | `d.mode-switch-restarts` | Forced by k.browser-args-fixed-at-creation. The honest alternative was not 'switch modes live' -- that is unavailable -- but 'ship a mode that... |
 | `d.session-carries-tab-ids` | Snapshots are keyed by tab id. Restoring with fresh ids would orphan every screenshot the previous run captured -- still on disk, permanently... |
 | `d.immersion-evicts-by-recency` | 'The last few in the chain' is a different question from 'what is worth keeping'. Habit weighting is right for a working session -- a reference doc... |
+| `d.grid-inherits-the-mode` | One layout, two correct results, and no mode check in the XAML. Up to 0009 the grid forced the window to maximise, so opening it resized the browser... |
+| `d.single-click-opens` | This was the single biggest reason the grid read as broken. Nothing else in this app, and no tab switcher anyone has used, needs two clicks to pick a... |
+| `d.zoom-connects-card-to-page` | The transition should make the page you land on visibly the card you chose. A cut, or a plain crossfade, leaves the user to re-establish where they... |
 
-### Constraints (immovable) (18)
+### Constraints (immovable) (19)
 
 | id | one-line |
 | --- | --- |
@@ -377,6 +380,7 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 | `k.browser-args-fixed-at-creation` | Any setting expressed as a Chromium switch cannot be changed in a running process. This is why switching modes RESTARTS Hearth rather than... |
 | `k.maximised-is-not-fullscreen` | Real fullscreen is WindowState.Normal, Topmost, sized explicitly to the monitor in DIPs. MaximiseFix.Fullscreen does this; the WM_GETMINMAXINFO hook... |
 | `k.mouse-input-never-reaches-wpf` | Pointer gestures can only be recognised inside the page, by an injected listener posting through window.chrome.webview. |
+| `k.collapsed-host-blocks-initialisation` | MainWindow.RestoreShell runs, including a forced UpdateLayout, before any activation triggered from the grid. |
 
 ### WebView2 APIs (4)
 
@@ -420,7 +424,7 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 | `cmp.sessionstore` | Exists to make d.mode-switch-restarts affordable. A browser that loses your tabs when you change a setting is one nobody changes the setting on. |
 | `cmp.gesturescript` | The only place a pointer gesture can be recognised, per k.mouse-input-never-reaches-wpf. |
 
-### Commits (9)
+### Commits (10)
 
 | id | one-line |
 | --- | --- |
@@ -433,3 +437,4 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 | `commit.0004` | Snapshot capture at blur, scroll replay on restore, placeholder painting during rebuild, and teardown enabled by default gated on holding a snapshot.... |
 | `commit.0008` | Browser keyboard shortcuts wired on both delivery paths and verified through the real OS input stack; low-power toggle removed and lean made the... |
 | `commit.0009` | Immersion added as the opposite pole to browse: real device fullscreen, generous recency-chain budget, filtering off, GPU and anti-throttling... |
+| `commit.0010` | Found and fixed the reason picking a tab from the grid hung: activation was started while the content host was still collapsed. Grid no longer... |

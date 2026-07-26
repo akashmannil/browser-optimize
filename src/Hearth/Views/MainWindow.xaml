@@ -196,13 +196,20 @@
             </Grid>
         </Border>
 
-        <!-- ── Big Picture ─────────────────────────────────────────────────
-             Spans every row and takes the window fullscreen. It cannot simply
-             stack above the page: WebView2 is a windowed HWND control and paints
-             over all WPF content regardless of Z-order (k.wpf-airspace), so the
-             content host is collapsed while this is up. -->
+        <!-- ── Tab grid ────────────────────────────────────────────────────
+             Spans rows 1-3, NOT the whole window, and never changes the window
+             size. That one detail is what makes it mode-aware for free: in
+             browse the tab strip stays visible above it and the grid fills the
+             window; in immersion the strip is already collapsed, so the same
+             markup fills the screen. The grid takes the shape the app is
+             currently in rather than imposing one (d.grid-inherits-the-mode).
+
+             It cannot simply stack above the page: WebView2 is a windowed HWND
+             control and paints over all WPF content regardless of Z-order
+             (k.wpf-airspace), so the content host is collapsed while this is
+             up. -->
         <Grid x:Name="BigPicture"
-              Grid.RowSpan="4"
+              Grid.Row="1" Grid.RowSpan="3"
               Panel.ZIndex="50"
               Visibility="Collapsed"
               Background="{DynamicResource Scrim}"
@@ -218,7 +225,7 @@
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <Grid Grid.Row="0" Margin="56,44,56,26">
+            <Grid Grid.Row="0" Margin="44,30,44,20">
                 <StackPanel>
                     <TextBlock Text="Your tabs"
                                Foreground="{DynamicResource TextPrimary}"
@@ -238,15 +245,17 @@
                         Click="BigPicture_Click" />
             </Grid>
 
-            <ScrollViewer Grid.Row="1" Margin="40,0"
-                          VerticalScrollBarVisibility="Auto"
-                          HorizontalScrollBarVisibility="Disabled">
-                <ListBox x:Name="TabWall"
-                         Background="Transparent"
-                         BorderThickness="0"
-                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                         KeyDown="TabWall_KeyDown"
-                         MouseDoubleClick="TabWall_Open">
+            <!-- The ListBox scrolls itself. It used to sit inside an outer
+                 ScrollViewer, which handed it infinite height: it never
+                 virtualised, and ScrollIntoView had nothing to scroll, so
+                 keyboard selection silently walked off the bottom of the
+                 screen. -->
+            <ListBox x:Name="TabWall" Grid.Row="1" Margin="30,0"
+                     Background="Transparent"
+                     BorderThickness="0"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                     ScrollViewer.VerticalScrollBarVisibility="Auto"
+                     KeyDown="TabWall_KeyDown">
                     <ListBox.ItemsPanel>
                         <ItemsPanelTemplate>
                             <WrapPanel Orientation="Horizontal" />
@@ -257,6 +266,17 @@
                         <Style TargetType="ListBoxItem">
                             <Setter Property="Margin" Value="14" />
                             <Setter Property="Padding" Value="0" />
+                            <Setter Property="Cursor" Value="Hand" />
+
+                            <!-- ONE click opens the tab. It used to take a
+                                 double-click, which is the main reason the grid
+                                 read as broken: a single click selected a card
+                                 and appeared to do nothing at all. Nothing else
+                                 in this app, or in any tab switcher anyone has
+                                 used, needs two clicks to pick a thing. -->
+                            <EventSetter Event="PreviewMouseLeftButtonUp"
+                                         Handler="TabCard_Click" />
+
                             <Setter Property="Template">
                                 <Setter.Value>
                                     <ControlTemplate TargetType="ListBoxItem">
@@ -365,14 +385,23 @@
                             </StackPanel>
                         </DataTemplate>
                     </ListBox.ItemTemplate>
-                </ListBox>
-            </ScrollViewer>
+            </ListBox>
 
-            <TextBlock Grid.Row="2" Margin="56,20,56,36"
+            <TextBlock Grid.Row="2" Margin="44,16,44,26"
                        Foreground="{DynamicResource TextTertiary}"
                        FontFamily="{StaticResource Body}"
                        FontSize="{StaticResource TextSM}"
-                       Text="Arrow keys to move    Enter to open    Esc to go back" />
+                       Text="Click a card to open it    Arrow keys to move    1-9 to jump    Esc to go back" />
+
+        <!-- The zoom-to-open surface. A card cannot be scaled up in place: it
+             lives inside the ListBox's own ScrollViewer, which clips to its
+             bounds, so the card would be cut off exactly as it got interesting.
+             Opening instead paints a copy of the card here, over every row, and
+             flies that. -->
+        <Canvas x:Name="ZoomLayer"
+                Grid.Row="0" Grid.RowSpan="3"
+                Panel.ZIndex="60"
+                IsHitTestVisible="False" />
         </Grid>
     </Grid>
 </Window>

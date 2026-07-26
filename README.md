@@ -41,6 +41,7 @@ Early. Built commit by commit, each with a design note in [`docs/commits/`](docs
 | [`0007`](docs/commits/0007-ui-overhaul.md) | UI overhaul — custom chrome, light/dark theming, motion |
 | [`0008`](docs/commits/0008-keyboard-and-lean-default.md) | Keyboard shortcuts that actually fire; lean by default + per-site shield |
 | [`0009`](docs/commits/0009-immersion-mode.md) | Immersion mode, session persistence, mouse gestures |
+| [`0010`](docs/commits/0010-tab-grid.md) | Tab grid fixed — single-click open, mode-aware, zoom transition |
 
 ### Two modes
 
@@ -97,11 +98,23 @@ while a page has focus its key messages are queued to *the browser process's* th
 `Window.PreviewKeyDown` never fires (`k.two-keyboard-paths`). Page keys arrive only through
 `CoreWebView2Controller.AcceleratorKeyPressed`, which the WPF wrapper does not expose.
 
-**Big Picture** (`F9` / `Ctrl+Shift+A`) — a full-screen, keyboard-driven wall of every tab, built
-from the screenshots hibernation already produces. Entering it pins the live budget to **1**: you
-are looking at pictures, so exactly one page needs to be real. The lean-back interface and the
-memory architecture happen to want the same thing, which is the reason the mode exists rather than
-being a skin. Leaving it puts every other tab straight to sleep, rather than waiting for pressure.
+### The tab grid
+
+`F9` or `Ctrl+Shift+A` opens a wall of every tab, built from the screenshots hibernation already
+produces. Click a card — once — and it flies up to fill the screen as the page loads behind it;
+`1`–`9` jump straight to a card. Entering pins the live budget to **1**: you are looking at
+pictures, so exactly one page needs to be real. Leaving it in browse puts every other tab straight
+to sleep rather than waiting for pressure; immersion deliberately keeps its chain warm.
+
+The grid takes the shape the app is already in rather than imposing one — an overlay inside the
+window in browse, full screen in immersion — from one layout with no mode check
+(`d.grid-inherits-the-mode`).
+
+It had never really worked before `0010`, and the reason was not cosmetic: picking a tab called
+`ActivateAsync` while the content host was still collapsed for airspace reasons, and
+`EnsureCoreWebView2Async` **hangs forever** inside a collapsed panel rather than failing
+(`k.collapsed-host-blocks-initialisation`). Because Big Picture pins the budget to 1, nearly every
+card was a cold tab, so the failure rate depended on which card you clicked.
 
 ## Interface
 

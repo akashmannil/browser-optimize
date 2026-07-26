@@ -315,7 +315,7 @@ public partial class MainWindow : Window
                 return Zoom(0);
 
             case BrowserCommand.ToggleGrid:
-                _ = SetBigPictureAsync(BigPicture.Visibility != Visibility.Visible);
+                _ = SetBigPictureAsync(!GridShowing);
                 return true;
 
             case BrowserCommand.ToggleImmersion:
@@ -326,7 +326,7 @@ public partial class MainWindow : Window
             // actually up to receive it; otherwise the page loses its ability to
             // stop a load or dismiss its own dialogs.
             case BrowserCommand.Dismiss:
-                if (BigPicture.Visibility != Visibility.Visible) return false;
+                if (!GridShowing) return false;
                 _ = SetBigPictureAsync(false);
                 return true;
 
@@ -610,79 +610,148 @@ public partial class MainWindow : Window
             _ = _tabs.ActivateAsync(tab);
     }
 
-    // Big Picture ------------------------------------------------------------
+    // ------------------------------------------------------------------------
+    // The tab grid
+    //
+    // Sized by the mode rather than by itself (d.grid-inherits-the-mode): it
+    // spans rows 1-3 and never touches the window. In browse the tab strip stays
+    // above it and it fills the window; in immersion the strip is already gone,
+    // so the same markup fills the screen. Up to 0009 it forced the window to
+    // maximise, which meant opening the grid resized the browser -- and leaving
+    // it did not always put the window back.
+    // ------------------------------------------------------------------------
+
+    private bool GridShowing => BigPicture.Visibility == Visibility.Visible;
+
+    /// <summary>Guards the open animation against a second click landing mid-flight.</summary>
+    private bool _leavingGrid;
 
     private void BigPicture_Click(object sender, RoutedEventArgs e) =>
-        _ = SetBigPictureAsync(BigPicture.Visibility != Visibility.Visible);
+        _ = SetBigPictureAsync(!GridShowing);
 
     private async Task SetBigPictureAsync(bool on)
     {
+        if (_tabs is null || GridShowing == on) return;
+
+        if (on) await EnterGridAsync();
+        else await LeaveGridAsync(zoomed: false);
+    }
+
+    private async Task EnterGridAsync()
+    {
         if (_tabs is null) return;
-        if ((BigPicture.Visibility == Visibility.Visible) == on) return;
 
-        if (on)
+        await _tabs.SetBigPictureAsync(true);
+
+        _stateBeforeBigPicture = WindowState;
+        NavBar.Visibility = Visibility.Collapsed;
+        StatusBar.Visibility = Visibility.Collapsed;
+
+        // The tab strip doubles as the title bar, so in browse it stays: losing
+        // it would take the window controls with it. Immersion already has it
+        // collapsed and leaves it that way.
+        if (Immersive) TitleBar.Visibility = Visibility.Collapsed;
+
+        // WebView2 paints above all WPF content (k.wpf-airspace), so the host
+        // has to leave the screen rather than sit behind the overlay.
+        ContentHost.Visibility = Visibility.Collapsed;
+        HidePlaceholder();
+
+        BigPicture.Visibility = Visibility.Visible;
+        BigPictureSubtitle.Text = Immersive
+            ? $"{_tabs.Tabs.Count} open {Dot} the last few stay awake"
+            : $"{_tabs.Tabs.Count} open {Dot} one stays awake while you're here";
+
+        TabWall.SelectedItem = _tabs.Active;
+        TabWall.Focus();
+        if (TabWall.SelectedItem is not null) TabWall.ScrollIntoView(TabWall.SelectedItem);
+
+        AnimateBigPicture(fadeIn: true);
+        StaggerCardsIn();
+
+        Sync();
+    }
+
+    /// <param name="activate">
+    /// The tab to switch to, if the grid is being left by picking one.
+    ///
+    /// It is activated HERE, after the shell is restored, and that ordering is
+    /// load-bearing rather than tidy — see <see cref="RestoreShell"/>.
+    /// </param>
+    private async Task LeaveGridAsync(bool zoomed, BrowserTab? activate = null)
+    {
+        if (_tabs is null) return;
+
+        // A zoom has already carried the eye to the page; fading the wall out
+        // again on top of it would read as two separate transitions.
+        if (!zoomed)
         {
-            await _tabs.SetBigPictureAsync(true);
-
-            // Genuinely fullscreen rather than an overlay: the chrome rows are
-            // collapsed and the window maximises, so the wall owns the screen
-            // the way a lean-back interface should.
-            _stateBeforeBigPicture = WindowState;
-            TitleBar.Visibility = Visibility.Collapsed;
-            NavBar.Visibility = Visibility.Collapsed;
-            StatusBar.Visibility = Visibility.Collapsed;
-            if (!Immersive) WindowState = WindowState.Maximized;
-
-            // WebView2 paints above all WPF content (k.wpf-airspace), so the
-            // host has to leave the screen rather than sit behind the overlay.
-            ContentHost.Visibility = Visibility.Collapsed;
-            HidePlaceholder();
-
-            BigPicture.Visibility = Visibility.Visible;
-            BigPictureSubtitle.Text =
-                $"{_tabs.Tabs.Count} open {Dot} one stays awake while you're here";
-
-            TabWall.SelectedItem = _tabs.Active;
-            TabWall.Focus();
-            if (TabWall.SelectedItem is not null) TabWall.ScrollIntoView(TabWall.SelectedItem);
-
-            AnimateBigPicture(fadeIn: true);
+            AnimateBigPicture(fadeIn: false);
+            await Task.Delay(210);
         }
-        else
+
+        RestoreShell();
+
+        if (activate is not null) await _tabs.ActivateAsync(activate);
+
+        await _tabs.SetBigPictureAsync(false);
+
+        // Leaving the wall in BROWSE means the user surveyed and chose, so
+        // everything else goes back to sleep now rather than waiting for a
+        // later activation to push it past the ceiling.
+        //
+        // Immersion deliberately does not do this. Its whole premise is that the
+        // last few tabs in the chain stay warm so stepping between them is
+        // instant; evicting them on every visit to the grid would make the grid
+        // the most expensive thing in the mode.
+        if (!Immersive)
         {
-            await AnimateBigPictureOutAsync();
-
-            BigPicture.Visibility = Visibility.Collapsed;
-            ContentHost.Visibility = Visibility.Visible;
-
-            // Immersion has no chrome to restore, and restoring the window state
-            // would drop it out of fullscreen.
-            if (!Immersive)
-            {
-                TitleBar.Visibility = Visibility.Visible;
-                NavBar.Visibility = Visibility.Visible;
-                StatusBar.Visibility = Visibility.Visible;
-                WindowState = _stateBeforeBigPicture;
-            }
-
-            await _tabs.SetBigPictureAsync(false);
-
-            // Leaving the wall in BROWSE means the user surveyed and chose, so
-            // everything else goes back to sleep now rather than waiting for a
-            // later activation to push it past the ceiling.
-            //
-            // Immersion deliberately does not do this. Its whole premise is that
-            // the last few tabs in the chain stay warm so stepping between them
-            // is instant; evicting them on every visit to the grid would make the
-            // grid the most expensive thing in the mode.
-            if (!Immersive)
-            {
-                await _tabs.HibernateAllButActiveAsync();
-                AddressBar.Focus();
-            }
+            await _tabs.HibernateAllButActiveAsync();
+            AddressBar.Focus();
         }
 
         Sync();
+    }
+
+    /// <summary>
+    /// Puts the chrome and the content host back, synchronously.
+    ///
+    /// THIS MUST RUN BEFORE ANY TAB IS ACTIVATED, and that is not a style
+    /// preference. A WebView2 cannot finish initialising inside a collapsed
+    /// panel: EnsureCoreWebView2Async waits for a realised HWND and a collapsed
+    /// element does not have one, so the call never returns
+    /// (k.collapsed-host-blocks-initialisation).
+    ///
+    /// This is what actually made the grid feel broken. Big Picture pins the
+    /// budget to one, so nearly every card in it is a COLD tab; picking one
+    /// called ActivateAsync while the host was still collapsed, and it hung
+    /// there holding the budget semaphore. Picking a tab that happened to still
+    /// hold a controller worked fine, which is exactly why the failure looked
+    /// intermittent rather than structural.
+    /// </summary>
+    private void RestoreShell()
+    {
+        BigPicture.Visibility = Visibility.Collapsed;
+        BigPicture.Opacity = 1;
+        ZoomLayer.Children.Clear();
+        ContentHost.Visibility = Visibility.Visible;
+
+        NavBar.Visibility = Visibility.Visible;
+        StatusBar.Visibility = Visibility.Visible;
+
+        // Immersion has no chrome to restore, and restoring the window state
+        // would drop it out of fullscreen.
+        if (!Immersive)
+        {
+            TitleBar.Visibility = Visibility.Visible;
+            WindowState = _stateBeforeBigPicture;
+        }
+
+        // Force the layout pass now rather than letting it wait for idle. The
+        // HwndHost only gets a window once it has been arranged, and the whole
+        // point of this method is that the activation which follows depends on
+        // that having already happened.
+        UpdateLayout();
     }
 
     /// <summary>
@@ -707,27 +776,179 @@ public partial class MainWindow : Window
             new DoubleAnimation(to, duration) { EasingFunction = ease });
     }
 
-    private async Task AnimateBigPictureOutAsync()
+    /// <summary>
+    /// Cards rise into place one after another rather than the grid appearing as
+    /// a single block. The delay is small and capped: past about a dozen cards a
+    /// per-item stagger stops reading as choreography and starts reading as the
+    /// application being slow.
+    /// </summary>
+    private void StaggerCardsIn()
     {
-        AnimateBigPicture(fadeIn: false);
-        await Task.Delay(210);
+        TabWall.UpdateLayout();
+
+        var ease = new QuarticEase { EasingMode = EasingMode.EaseOut };
+
+        for (var i = 0; i < TabWall.Items.Count; i++)
+        {
+            if (TabWall.ItemContainerGenerator.ContainerFromIndex(i) is not ListBoxItem card)
+                continue;   // Virtualised away, i.e. off-screen. Nothing to stagger.
+
+            var lift = new TranslateTransform(0, 16);
+            card.RenderTransform = lift;
+            card.Opacity = 0;
+
+            var begin = TimeSpan.FromMilliseconds(Math.Min(i, 12) * 26);
+
+            card.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1,
+                TimeSpan.FromMilliseconds(240)) { BeginTime = begin, EasingFunction = ease });
+
+            lift.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(16, 0,
+                TimeSpan.FromMilliseconds(320)) { BeginTime = begin, EasingFunction = ease });
+        }
     }
 
-    private async void TabWall_KeyDown(object sender, KeyEventArgs e)
+    /// <summary>One click opens a card. Selecting it and waiting for a second click is what made the grid feel broken.</summary>
+    private void TabCard_Click(object sender, MouseButtonEventArgs e)
     {
+        if (sender is not ListBoxItem { DataContext: BrowserTab tab }) return;
+        e.Handled = true;
+        _ = OpenFromGridAsync(tab);
+    }
+
+    private void TabWall_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (_tabs is null) return;
+
+        // 1-9 jump straight to a card. In a wall of pictures the position IS the
+        // identity, so a number is the most direct thing a keyboard can offer.
+        if (e.Key is >= Key.D1 and <= Key.D9 || e.Key is >= Key.NumPad1 and <= Key.NumPad9)
+        {
+            var index = (e.Key is >= Key.NumPad1 and <= Key.NumPad9 ? e.Key - Key.NumPad1 : e.Key - Key.D1);
+            if (_tabs.Tabs.ElementAtOrDefault(index) is { } numbered)
+            {
+                e.Handled = true;
+                _ = OpenFromGridAsync(numbered);
+            }
+            return;
+        }
+
         if (e.Key is not (Key.Enter or Key.Space)) return;
         e.Handled = true;
-        await OpenSelectedAsync();
+
+        if (TabWall.SelectedItem is BrowserTab selected) _ = OpenFromGridAsync(selected);
     }
 
-    private async void TabWall_Open(object sender, MouseButtonEventArgs e) =>
-        await OpenSelectedAsync();
-
-    private async Task OpenSelectedAsync()
+    private async Task OpenFromGridAsync(BrowserTab tab)
     {
-        if (_tabs is null || TabWall.SelectedItem is not BrowserTab tab) return;
-        await _tabs.ActivateAsync(tab);
-        await SetBigPictureAsync(false);
+        if (_tabs is null || _leavingGrid || !GridShowing) return;
+        _leavingGrid = true;
+
+        try
+        {
+            TabWall.SelectedItem = tab;
+
+            // Animate first, activate second. Overlapping them looks tempting --
+            // the zoom would cover the page load -- but it deadlocks: the
+            // activation cannot complete until the content host is uncollapsed,
+            // and it holds the budget semaphore while it waits
+            // (k.collapsed-host-blocks-initialisation). LeaveGridAsync restores
+            // the shell before it activates, which is the whole ordering.
+            await ZoomIntoCardAsync(tab);
+            await LeaveGridAsync(zoomed: true, activate: tab);
+
+            Diag.Log($"grid: opened {tab.HostLabel}");
+        }
+        finally
+        {
+            _leavingGrid = false;
+        }
+    }
+
+    /// <summary>
+    /// Flies the chosen card up to fill the viewport, so the tab you land on is
+    /// visibly the card you picked.
+    ///
+    /// The card itself cannot be scaled in place: it sits inside the ListBox's
+    /// ScrollViewer, which clips to its bounds, so it would be cut off exactly
+    /// as the movement got interesting. A VisualBrush copy is painted onto
+    /// ZoomLayer, which spans every row, and that is what actually moves.
+    /// </summary>
+    private async Task ZoomIntoCardAsync(BrowserTab tab)
+    {
+        const int DurationMs = 280;
+
+        var card = TabWall.ItemContainerGenerator.ContainerFromItem(tab) as ListBoxItem;
+        var viewportWidth = BigPicture.ActualWidth;
+        var viewportHeight = BigPicture.ActualHeight;
+
+        // Virtualised away, or laid out at zero size. Falling back to the plain
+        // fade is correct here: a broken animation must never block the open.
+        if (card is null || card.ActualWidth <= 0 || viewportWidth <= 0)
+        {
+            AnimateBigPicture(fadeIn: false);
+            await Task.Delay(200);
+            return;
+        }
+
+        var origin = card.TransformToVisual(BigPicture).Transform(new Point(0, 0));
+
+        var ghost = new System.Windows.Shapes.Rectangle
+        {
+            Width = card.ActualWidth,
+            Height = card.ActualHeight,
+            Fill = new VisualBrush(card) { Stretch = Stretch.None },
+            RenderTransformOrigin = new Point(0.5, 0.5)
+        };
+
+        var scale = new ScaleTransform(1, 1);
+        var slide = new TranslateTransform(0, 0);
+        var transform = new TransformGroup();
+        transform.Children.Add(scale);
+        transform.Children.Add(slide);
+        ghost.RenderTransform = transform;
+
+        Canvas.SetLeft(ghost, origin.X);
+        Canvas.SetTop(ghost, origin.Y);
+        ZoomLayer.Children.Add(ghost);
+
+        // Hide the real card so the copy is not doubled up behind itself.
+        card.Opacity = 0;
+
+        // Cover the viewport rather than fit inside it: the card becomes the
+        // page, and a letterboxed intermediate step would give that away.
+        var target = Math.Max(viewportWidth / card.ActualWidth, viewportHeight / card.ActualHeight);
+
+        var ease = new QuarticEase { EasingMode = EasingMode.EaseIn };
+        var duration = TimeSpan.FromMilliseconds(DurationMs);
+
+        scale.BeginAnimation(ScaleTransform.ScaleXProperty,
+            new DoubleAnimation(target, duration) { EasingFunction = ease });
+        scale.BeginAnimation(ScaleTransform.ScaleYProperty,
+            new DoubleAnimation(target, duration) { EasingFunction = ease });
+
+        slide.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(
+            viewportWidth / 2 - (origin.X + card.ActualWidth / 2), duration) { EasingFunction = ease });
+        slide.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(
+            viewportHeight / 2 - (origin.Y + card.ActualHeight / 2), duration) { EasingFunction = ease });
+
+        // The rest of the wall drops away underneath the card that is growing.
+        TabWall.BeginAnimation(OpacityProperty,
+            new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(180)) { EasingFunction = ease });
+
+        await Task.Delay(DurationMs);
+
+        // Fade the ghost out at the very end so the swap to live content is not
+        // a hard cut from a screenshot to a page.
+        ghost.BeginAnimation(OpacityProperty,
+            new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(110)));
+        BigPicture.BeginAnimation(OpacityProperty,
+            new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(110)));
+
+        await Task.Delay(110);
+
+        card.Opacity = 1;
+        TabWall.BeginAnimation(OpacityProperty, null);
+        TabWall.Opacity = 1;
     }
 
     /// <summary>
