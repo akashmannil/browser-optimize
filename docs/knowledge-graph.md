@@ -314,7 +314,7 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 
 <!-- GENERATED: node index below is rebuilt from knowledge-graph.json. -->
 
-**83 nodes, 185 edges**, current to commit `0010`. This table is generated from the JSON; edit the JSON, never this table.
+**85 nodes, 189 edges**, current to commit `0011`. This table is generated from the JSON; edit the JSON, never this table.
 
 ### Problems (4)
 
@@ -335,7 +335,7 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 | `c.ram-for-disk-trade` | Disk cost is effectively free at any realistic tab count. 1,000 hibernated tabs would occupy roughly 27 MB. There is no reason to ration snapshots or... |
 | `c.hibernate-by-default` **[core thesis]** | Every other browser treats loaded as default and unloading as an emergency. Chrome Memory Saver and Firefox tab unloading are REACTIVE, triggering... |
 
-### Decisions (18)
+### Decisions (19)
 
 | id | one-line |
 | --- | --- |
@@ -357,6 +357,7 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 | `d.grid-inherits-the-mode` | One layout, two correct results, and no mode check in the XAML. Up to 0009 the grid forced the window to maximise, so opening it resized the browser... |
 | `d.single-click-opens` | This was the single biggest reason the grid read as broken. Nothing else in this app, and no tab switcher anyone has used, needs two clicks to pick a... |
 | `d.zoom-connects-card-to-page` | The transition should make the page you land on visibly the card you chose. A cut, or a plain crossfade, leaves the user to re-establish where they... |
+| `d.address-bar-follows-the-tab` | Guarding on focus alone was wrong because focus SURVIVES a tab switch: Ctrl+T focuses the bar, and every switch after that (Ctrl+Tab, Ctrl+1... |
 
 ### Constraints (immovable) (19)
 
@@ -424,7 +425,7 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 | `cmp.sessionstore` | Exists to make d.mode-switch-restarts affordable. A browser that loses your tabs when you change a setting is one nobody changes the setting on. |
 | `cmp.gesturescript` | The only place a pointer gesture can be recognised, per k.mouse-input-never-reaches-wpf. |
 
-### Commits (10)
+### Commits (11)
 
 | id | one-line |
 | --- | --- |
@@ -438,3 +439,4 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 | `commit.0008` | Browser keyboard shortcuts wired on both delivery paths and verified through the real OS input stack; low-power toggle removed and lean made the... |
 | `commit.0009` | Immersion added as the opposite pole to browse: real device fullscreen, generous recency-chain budget, filtering off, GPU and anti-throttling... |
 | `commit.0010` | Found and fixed the reason picking a tab from the grid hung: activation was started while the content host was still collapsed. Grid no longer... |
+| `commit.0011` | The address bar no longer keeps showing the previous tab's URL after a switch made while it had keyboard focus. |

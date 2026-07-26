@@ -2,7 +2,7 @@
   "project": "hearth",
   "description": "A low-resource Windows browser shell built on WebView2, whose core bet is that hibernated is a tab's default state and live is a budgeted exception.",
   "schema_version": "1.0",
-  "graph_updated_at_commit": "0010",
+  "graph_updated_at_commit": "0011",
   "consumer_notes": "This file is the authoritative machine-readable model of WHY this codebase is shaped the way it is. Source code records what the system does; this graph records the reasoning, the rejected alternatives, and the constraints that must not be violated. Agents should read this before proposing architectural changes. Every node has a stable `id` that is safe to reference in commits, issues, and other documents. When you add a feature, add its nodes/edges here in the same commit.",
   "node_types": {
     "problem": "An observed user-facing or system-level problem the project exists to solve.",
@@ -758,6 +758,22 @@
       "label": "0010 - tab grid",
       "summary": "Found and fixed the reason picking a tab from the grid hung: activation was started while the content host was still collapsed. Grid no longer resizes the window and inherits the current mode's shape; single click and number keys open a card; opening zooms the card into the page; the ListBox now scrolls itself instead of sitting inside an outer ScrollViewer.",
       "doc": "docs/commits/0010-tab-grid.md"
+    },
+    {
+      "id": "d.address-bar-follows-the-tab",
+      "type": "decision",
+      "label": "The address bar tracks the active tab, not keyboard focus",
+      "summary": "Sync overwrites the address bar whenever the active tab changed, even while the field has focus. It only preserves in-progress text when the tab is the same one the text belongs to.",
+      "rationale": "Guarding on focus alone was wrong because focus SURVIVES a tab switch: Ctrl+T focuses the bar, and every switch after that (Ctrl+Tab, Ctrl+1, Ctrl+Shift+T, picking a card) happened while it still had focus. The bar then displayed the previous tab's URL over the current tab's page.",
+      "why_it_matters": "The address bar is the only place the interface states what you are looking at, and every judgement a person makes about whether to trust a page starts there. A browser that misreports the current URL is not a cosmetic problem.",
+      "discovered_in": "0011, in the 0010 flow test: strip highlighted Example Domain, page was example.com, bar read en.wikipedia.org/wiki/Tab_interface."
+    },
+    {
+      "id": "commit.0011",
+      "type": "commit",
+      "label": "0011 - address bar follows the tab",
+      "summary": "The address bar no longer keeps showing the previous tab's URL after a switch made while it had keyboard focus.",
+      "doc": "docs/commits/0011-address-bar-follows-the-tab.md"
     }
   ],
   "edges": [
@@ -1747,6 +1763,28 @@
       "from": "d.zoom-connects-card-to-page",
       "rel": "introduced_in",
       "to": "commit.0010"
+    },
+    {
+      "from": "d.address-bar-follows-the-tab",
+      "rel": "constrains",
+      "to": "cmp.mainwindow"
+    },
+    {
+      "from": "d.address-bar-follows-the-tab",
+      "rel": "motivated_by",
+      "to": "p.invisible-cost",
+      "note": "Same family of problem: the interface must state the truth about what it is doing."
+    },
+    {
+      "from": "d.address-bar-follows-the-tab",
+      "rel": "depends_on",
+      "to": "d.single-click-opens",
+      "note": "Opening from the grid is one of the switches that happens while the bar holds focus."
+    },
+    {
+      "from": "d.address-bar-follows-the-tab",
+      "rel": "introduced_in",
+      "to": "commit.0011"
     }
   ]
 }

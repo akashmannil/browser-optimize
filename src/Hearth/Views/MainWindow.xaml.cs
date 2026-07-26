@@ -40,6 +40,9 @@ public partial class MainWindow : Window
     /// <summary>Guards against SelectionChanged firing while we set the selection.</summary>
     private bool _syncing;
 
+    /// <summary>The tab whose URL the address bar is currently showing.</summary>
+    private BrowserTab? _addressBarTab;
+
     public MainWindow()
     {
         InitializeComponent();
@@ -449,8 +452,18 @@ public partial class MainWindow : Window
         if (_tabs is null) return;
 
         var active = _tabs.Active;
-        if (active is not null && !AddressBar.IsFocused)
+
+        // Don't clobber a URL someone is halfway through typing -- but DO
+        // overwrite when the tab itself changed underneath them. Guarding on
+        // focus alone left the address bar showing the previous tab's URL after
+        // a switch, which is the one thing an address bar must never do: it is
+        // the only place the browser states what you are looking at.
+        var switched = !ReferenceEquals(active, _addressBarTab);
+        if (active is not null && (switched || !AddressBar.IsFocused))
+        {
             AddressBar.Text = active.Url;
+            _addressBarTab = active;
+        }
 
         _syncing = true;
         if (!ReferenceEquals(TabStrip.SelectedItem, active)) TabStrip.SelectedItem = active;

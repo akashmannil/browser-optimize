@@ -364,7 +364,7 @@
 
 <script>
 const DATA = {
-  rev: "0010",
+  rev: "0011",
   nodeTypes: {
     problem:"An observed problem the project exists to solve",
     concept:"A mental model used to reason about the system",
@@ -459,6 +459,8 @@ const DATA = {
     {id:"d.single-click-opens",type:"decision",label:"One click opens a card; numbers 1-9 jump straight to one",summary:"The grid opened on MouseDoubleClick until 0010. A single click selected a card and appeared to do nothing at all.",rationale:"This was the single biggest reason the grid read as broken. Nothing else in this app, and no tab switcher anyone has used, needs two clicks to pick a thing. In a wall of pictures the position is the identity, so a number key is the most direct thing a keyboard can offer alongside it.",cost:"There is no click target left for selecting a card without opening it, so per-card actions -- close, pin -- will need their own hit areas rather than a selection state."},
     {id:"d.zoom-connects-card-to-page",type:"decision",label:"Opening flies a copy of the card up to fill the viewport",summary:"A VisualBrush copy of the chosen card is painted onto a Canvas spanning every row and animated to cover the viewport, while the rest of the wall fades underneath it.",rationale:"The transition should make the page you land on visibly the card you chose. A cut, or a plain crossfade, leaves the user to re-establish where they are.",why_a_copy:"The card cannot be animated in place: it lives inside the ListBox's ScrollViewer, which clips to its bounds, so it would be sliced off exactly as the movement got interesting.",why_cover_not_fit:"A letterboxed intermediate frame gives away that this is a thumbnail and not the page.",safety:"Falls back to a plain fade when the container has been virtualised away or laid out at zero size. A decorative animation must never be able to block the actual open."},
     {id:"commit.0010",type:"commit",label:"0010 - tab grid",summary:"Found and fixed the reason picking a tab from the grid hung: activation was started while the content host was still collapsed. Grid no longer resizes the window and inherits the current mode's shape; single click and number keys open a card; opening zooms the card into the page; the ListBox now scrolls itself instead of sitting inside an outer ScrollViewer.",doc:"docs/commits/0010-tab-grid.md"},
+    {id:"d.address-bar-follows-the-tab",type:"decision",label:"The address bar tracks the active tab, not keyboard focus",summary:"Sync overwrites the address bar whenever the active tab changed, even while the field has focus. It only preserves in-progress text when the tab is the same one the text belongs to.",rationale:"Guarding on focus alone was wrong because focus SURVIVES a tab switch: Ctrl+T focuses the bar, and every switch after that (Ctrl+Tab, Ctrl+1, Ctrl+Shift+T, picking a card) happened while it still had focus. The bar then displayed the previous tab's URL over the current tab's page.",why_it_matters:"The address bar is the only place the interface states what you are looking at, and every judgement a person makes about whether to trust a page starts there. A browser that misreports the current URL is not a cosmetic problem.",discovered_in:"0011, in the 0010 flow test: strip highlighted Example Domain, page was example.com, bar read en.wikipedia.org/wiki/Tab_interface."},
+    {id:"commit.0011",type:"commit",label:"0011 - address bar follows the tab",summary:"The address bar no longer keeps showing the previous tab's URL after a switch made while it had keyboard focus.",doc:"docs/commits/0011-address-bar-follows-the-tab.md"},
   ],
   edges: [
     {from:"p.tab-hoarding",rel:"motivated_by",to:"p.archive-blackhole",note:"Users resist archiving precisely because archives are not trustworthy retrieval."},
@@ -646,6 +648,10 @@ const DATA = {
     {from:"d.grid-inherits-the-mode",rel:"introduced_in",to:"commit.0010"},
     {from:"d.single-click-opens",rel:"introduced_in",to:"commit.0010"},
     {from:"d.zoom-connects-card-to-page",rel:"introduced_in",to:"commit.0010"},
+    {from:"d.address-bar-follows-the-tab",rel:"constrains",to:"cmp.mainwindow"},
+    {from:"d.address-bar-follows-the-tab",rel:"motivated_by",to:"p.invisible-cost",note:"Same family of problem: the interface must state the truth about what it is doing."},
+    {from:"d.address-bar-follows-the-tab",rel:"depends_on",to:"d.single-click-opens",note:"Opening from the grid is one of the switches that happens while the bar holds focus."},
+    {from:"d.address-bar-follows-the-tab",rel:"introduced_in",to:"commit.0011"},
   ]
 };
 

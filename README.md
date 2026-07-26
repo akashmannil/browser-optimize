@@ -42,6 +42,7 @@ Early. Built commit by commit, each with a design note in [`docs/commits/`](docs
 | [`0008`](docs/commits/0008-keyboard-and-lean-default.md) | Keyboard shortcuts that actually fire; lean by default + per-site shield |
 | [`0009`](docs/commits/0009-immersion-mode.md) | Immersion mode, session persistence, mouse gestures |
 | [`0010`](docs/commits/0010-tab-grid.md) | Tab grid fixed — single-click open, mode-aware, zoom transition |
+| [`0011`](docs/commits/0011-address-bar-follows-the-tab.md) | Address bar follows the tab, not keyboard focus |
 
 ### Two modes
 
