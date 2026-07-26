@@ -93,6 +93,59 @@ public sealed class TabManager
     /// <summary>Per-host exemptions from content filtering.</summary>
     public SiteRules Rules { get; } = new();
 
+    /// <summary>The mode this process is running in.</summary>
+    public HearthMode Mode => _options.Profile.Mode;
+
+    /// <summary>
+    /// Raised when a page reports a navigation gesture -- the both-buttons swipe
+    /// or a mouse back/forward button. Mouse input over web content never
+    /// reaches WPF (k.mouse-input-never-reaches-wpf), so it arrives here as a
+    /// web message from an injected listener instead.
+    /// </summary>
+    public event EventHandler<string>? Gesture;
+
+    /// <summary>
+    /// Snapshot of the tab list for <see cref="SessionStore"/>. Ids are carried
+    /// so a restored tab still owns its screenshot on disk.
+    /// </summary>
+    public SessionState CaptureSession() => new()
+    {
+        Mode = Mode,
+        Tabs = _tabs.Select(t => new SessionTab
+        {
+            Id = t.Id,
+            Url = t.Url,
+            Title = t.Title,
+            IsActive = ReferenceEquals(t, Active)
+        }).ToList()
+    };
+
+    /// <summary>
+    /// Rebuilds tabs from a saved session without activating any of them. Cold
+    /// is the correct restored state: reopening 40 tabs must cost 40 URLs, not
+    /// 40 renderers, or restore would violate the one thesis the project has
+    /// (c.hibernate-by-default). The caller activates exactly one.
+    /// </summary>
+    public BrowserTab? RestoreSession(SessionState state)
+    {
+        BrowserTab? active = null;
+
+        foreach (var saved in state.Tabs)
+        {
+            var tab = new BrowserTab(saved.Url, saved.Id) { Title = saved.Title };
+
+            // A snapshot from the previous run is already on disk under this id,
+            // so adopt it: the grid comes back populated rather than blank.
+            Snapshots.Adopt(tab);
+
+            _tabs.Add(tab);
+            if (saved.IsActive) active = tab;
+        }
+
+        Changed?.Invoke(this, EventArgs.Empty);
+        return active ?? _tabs.FirstOrDefault();
+    }
+
     /// <summary>
     /// Raised when a tab has just been given a brand-new WebView2, so the shell
     /// can hook things that live on the control rather than on the tab -- the
@@ -146,7 +199,9 @@ public sealed class TabManager
         try
         {
             var now = DateTime.UtcNow;
-            foreach (var tab in EvictionPolicy.EvictionOrder(_tabs, Active, now).ToList())
+            foreach (var tab in EvictionPolicy
+                         .EvictionOrder(_tabs, Active, now, _options.Profile.EvictByRecencyOnly)
+                         .ToList())
                 await HibernateAsync(tab);
         }
         finally
@@ -291,15 +346,22 @@ public sealed class TabManager
         var folder = Path.Combine(App.StoreRoot, "webview2");
         Directory.CreateDirectory(folder);
 
-        // --renderer-process-limit is the only embedder-side lever on the process
-        // model (api.additional-browser-arguments). Without it the live-tab budget
-        // is toothless: commit 0002 measured 14 renderers for 5 tabs because site
-        // isolation gives every cross-origin iframe its own process, so capping
-        // tabs caps almost nothing. See HearthOptions for the security trade-off.
+        // THIS IS THE ONLY MOMENT these switches can be set
+        // (k.browser-args-fixed-at-creation). AdditionalBrowserArguments is read
+        // when the browser process starts and never again, and WebView2 refuses
+        // a second environment over the same user-data folder with different
+        // options. That single fact is why changing mode restarts the process
+        // rather than reconfiguring a live one.
+        //
+        // --renderer-process-limit is here too and does nothing, deliberately
+        // left as a documented dead end (api.additional-browser-arguments).
         var environmentOptions = new CoreWebView2EnvironmentOptions();
         var args = options.BrowserArguments();
         if (args.Length > 0)
             environmentOptions.AdditionalBrowserArguments = args;
+
+        Diag.Log($"environment: mode={options.Profile.Mode} budget={options.LiveTabBudget} "
+               + $"filter={options.BlockThirdPartyFrames} args=[{args}]");
 
         return await CoreWebView2Environment.CreateAsync(
             browserExecutableFolder: null,
@@ -385,7 +447,9 @@ public sealed class TabManager
         var overBudget = LiveCount - EffectiveBudget;
         if (overBudget <= 0) return;
 
-        foreach (var victim in EvictionPolicy.EvictionOrder(_tabs, Active, now).Take(overBudget))
+        foreach (var victim in EvictionPolicy
+                     .EvictionOrder(_tabs, Active, now, _options.Profile.EvictByRecencyOnly)
+                     .Take(overBudget))
             await HibernateAsync(victim);
     }
 
@@ -501,6 +565,30 @@ public sealed class TabManager
             }
             Changed?.Invoke(this, EventArgs.Empty);
         };
+
+        // Navigation gestures are recognised inside the page, because mouse
+        // input over web content never reaches WPF at all
+        // (k.mouse-input-never-reaches-wpf).
+        core.WebMessageReceived += (_, e) =>
+        {
+            string message;
+            try { message = e.TryGetWebMessageAsString(); }
+            catch { return; }   // Not one of ours; pages may post objects.
+
+            if (message.StartsWith("hearth:", StringComparison.Ordinal))
+                Gesture?.Invoke(this, message["hearth:".Length..]);
+        };
+
+        try
+        {
+            await core.AddScriptToExecuteOnDocumentCreatedAsync(GestureScript.Source);
+        }
+        catch (Exception ex)
+        {
+            // Gestures are a convenience with a keyboard equivalent for every
+            // action, so losing them must never cost the tab.
+            Diag.Log($"gesture script injection failed: {ex.Message}");
+        }
 
         core.Navigate(tab.Url);
         tab.State = TabState.Live;

@@ -40,6 +40,41 @@ Early. Built commit by commit, each with a design note in [`docs/commits/`](docs
 | [`0006`](docs/commits/0006-big-picture.md) | Big Picture — full-screen tab wall, live budget pinned to 1 |
 | [`0007`](docs/commits/0007-ui-overhaul.md) | UI overhaul — custom chrome, light/dark theming, motion |
 | [`0008`](docs/commits/0008-keyboard-and-lean-default.md) | Keyboard shortcuts that actually fire; lean by default + per-site shield |
+| [`0009`](docs/commits/0009-immersion-mode.md) | Immersion mode, session persistence, mouse gestures |
+
+### Two modes
+
+**Browse** is the default and is lean by construction. **Immersion** (`F11`) is the opposite pole:
+real device fullscreen with no chrome, the last few tabs in the chain kept warm, filtering off, and
+Chromium started with GPU and anti-throttling switches.
+
+| Mode | Renderers | Total |
+| --- | ---: | ---: |
+| browse | 3 | 890 MB |
+| immersion | 20 | **2197 MB** |
+
+*Six real sites, every tab activated so the budget binds, one build, 95 s settle.*
+
+**Immersion costs about 2.5× browse**, and that number belongs next to the feature rather than in a
+footnote. The thesis was never that memory does not matter — it is that you should decide when to
+spend it and be able to see what you spent.
+
+**Switching modes restarts Hearth**, which is not a shortcut. `AdditionalBrowserArguments` is read
+once, when the browser process starts, and WebView2 refuses a second environment over the same
+user-data folder with different options — so the switches that make immersion faster cannot be
+applied to a running process at all (`k.browser-args-fixed-at-creation`). The alternative was a mode
+that claims to boost performance while changing nothing. Tabs survive the restart via
+`store/session.json`, which carries tab **ids** so restored tabs still own their screenshots.
+
+Restored tabs come back **cold**, and restore is a URL and a title — not scroll, not form state.
+
+### Gestures
+
+Hold **both mouse buttons and swipe** to change tabs; thumb buttons go back and forward. These are
+recognised by a script injected into the page, because mouse input over web content never reaches
+WPF and — unlike the keyboard — has no native escape hatch (`k.mouse-input-never-reaches-wpf`). They
+are unavailable where page script cannot run, such as the PDF viewer, which is why every gesture has
+a keyboard equivalent.
 
 ### Lean is the default
 

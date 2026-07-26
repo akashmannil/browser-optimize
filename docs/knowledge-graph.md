@@ -198,6 +198,49 @@ One tab on `stackoverflow.com`, one Debug build, 90 s settle, only `HEARTH_BLOCK
 Absolute figures are **not** comparable with `0005`'s: this is a Debug build and includes Hearth's
 own WPF process. The within-run control is what the claim rests on.
 
+## Modes (commit `0009`)
+
+```mermaid
+graph LR
+  KA["k.browser-args-fixed-at-creation<br/>switches set once, at CreateAsync"]
+  DM["d.mode-switch-restarts<br/>relaunch with --mode="]
+  SS["cmp.sessionstore<br/>tabs survive the restart"]
+  ID["d.session-carries-tab-ids<br/>snapshots stay reachable"]
+
+  BR["BROWSE<br/>budget 3 · filter on<br/>3 renderers · 890 MB"]
+  IM["IMMERSION<br/>budget 5 · filter off · fullscreen<br/>20 renderers · 2197 MB"]
+
+  KA --> DM
+  DM --> SS
+  SS --> ID
+  DM --> BR
+  DM --> IM
+
+  KF["k.maximised-is-not-fullscreen<br/>the shell never yields to a maximised window"]
+  KM["k.mouse-input-never-reaches-wpf<br/>no AcceleratorKeyPressed for the mouse"]
+  KF --> IM
+  KM --> IM
+
+  style KA fill:#742a2a,stroke:#4a1a1a,color:#fff
+  style KF fill:#742a2a,stroke:#4a1a1a,color:#fff
+  style KM fill:#742a2a,stroke:#4a1a1a,color:#fff
+  style DM fill:#2F855A,stroke:#1a4a30,color:#fff
+  style ID fill:#2F855A,stroke:#1a4a30,color:#fff
+  style BR fill:#2B6CB0,stroke:#1a4a7a,color:#fff
+  style IM fill:#E8833A,stroke:#8a4a12,color:#1E1F22
+```
+
+Six real sites, every tab activated so the budget binds, one Debug build, 95 s settle:
+
+| Mode | Renderers | Total |
+| --- | ---: | ---: |
+| browse | 3 | 890 MB |
+| immersion | 20 | **2197 MB** |
+
+**Immersion costs about 2.5x browse**, which is why it is entered deliberately. The thesis was never
+that memory does not matter — it is that the user should decide when to spend it and be able to see
+what they spent (`m.immersion-cost`).
+
 ## Measured results (commit `0003`)
 
 Eight real sites, every tab activated so the budget binds:
@@ -271,7 +314,7 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 
 <!-- GENERATED: node index below is rebuilt from knowledge-graph.json. -->
 
-**67 nodes, 142 edges**, current to commit `0008`. This table is generated from the JSON; edit the JSON, never this table.
+**78 nodes, 172 edges**, current to commit `0009`. This table is generated from the JSON; edit the JSON, never this table.
 
 ### Problems (4)
 
@@ -292,7 +335,7 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 | `c.ram-for-disk-trade` | Disk cost is effectively free at any realistic tab count. 1,000 hibernated tabs would occupy roughly 27 MB. There is no reason to ration snapshots or... |
 | `c.hibernate-by-default` **[core thesis]** | Every other browser treats loaded as default and unloading as an emergency. Chrome Memory Saver and Firefox tab unloading are REACTIVE, triggering... |
 
-### Decisions (12)
+### Decisions (15)
 
 | id | one-line |
 | --- | --- |
@@ -308,8 +351,11 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 | `d.lean-is-the-default` | c.hibernate-by-default says hibernated is a tab's default state. A browser that only honours that once the user finds a toggle does not hold the... |
 | `d.filtering-needs-an-escape-hatch` | Filtering can only be a default if a user who hits a broken login has an explanation and a remedy in the same place. A permanently visible badge is... |
 | `d.engine-labels-over-inference` | Chromium computes these on every request and they depend on no state the embedder has to keep correct. The URL-comparison version needed Source to be... |
+| `d.mode-switch-restarts` | Forced by k.browser-args-fixed-at-creation. The honest alternative was not 'switch modes live' -- that is unavailable -- but 'ship a mode that... |
+| `d.session-carries-tab-ids` | Snapshots are keyed by tab id. Restoring with fresh ids would orphan every screenshot the previous run captured -- still on disk, permanently... |
+| `d.immersion-evicts-by-recency` | 'The last few in the chain' is a different question from 'what is worth keeping'. Habit weighting is right for a working session -- a reference doc... |
 
-### Constraints (immovable) (15)
+### Constraints (immovable) (18)
 
 | id | one-line |
 | --- | --- |
@@ -328,6 +374,9 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 | `k.wpf-wrapper-hides-controller` | Page-level keyboard handling requires reflection. It is cached once per process and fail-soft: a failed lookup degrades shortcuts to chrome-only and... |
 | `k.double-dispatch-on-page-keys` | The chrome path must decline any keystroke that originated in web content, but only while the native hook is known to be working. |
 | `k.source-is-stale-during-navigation` | This shipped in 0005 and was invisible for three commits, because filtering could only be engaged mid-session -- by which time a page had committed... |
+| `k.browser-args-fixed-at-creation` | Any setting expressed as a Chromium switch cannot be changed in a running process. This is why switching modes RESTARTS Hearth rather than... |
+| `k.maximised-is-not-fullscreen` | Real fullscreen is WindowState.Normal, Topmost, sized explicitly to the monitor in DIPs. MaximiseFix.Fullscreen does this; the WM_GETMINMAXINFO hook... |
+| `k.mouse-input-never-reaches-wpf` | Pointer gestures can only be recognised inside the page, by an injected listener posting through window.chrome.webview. |
 
 ### WebView2 APIs (4)
 
@@ -338,7 +387,7 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 | `api.capturepreview` | Captures the visible content of a WebView2 to a PNG or JPEG stream. Used to produce the visual placeholder that makes an evicted tab... |
 | `api.memory-target-level` | Hints to the runtime that a WebView2 should minimise memory usage. Cheaper and lower-fidelity than TrySuspend; usable as an intermediate tier for... |
 
-### Metrics (4)
+### Metrics (5)
 
 | id | one-line |
 | --- | --- |
@@ -346,8 +395,9 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 | `m.restore-fidelity` | Whether a rehydrated tab returns to the same scroll offset, form state and media position. The product thesis fails if users can feel eviction... |
 | `m.reclaim-delta` | Working-set bytes returned to the OS by evicting one tab. Doubles as the per-tab cost estimate that makes the invisible cost legible to users. |
 | `m.filtering-reclaim` | One tab on stackoverflow.com, one Debug build, 90 s settle, only HEARTH_BLOCK_FRAMES varying. Filtering on: 1 renderer / 719 MB. Filtering off... |
+| `m.immersion-cost` | Six real sites, every tab activated so the budget binds, one Debug build, 95 s settle. Browse: 3 renderers / 890 MB. Immersion: 20 renderers / 2197... |
 
-### Components (15)
+### Components (18)
 
 | id | one-line |
 | --- | --- |
@@ -366,8 +416,11 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 | `cmp.shortcutrouter` | Map is static and pure. Both paths must resolve through it; a second key-to-command table anywhere is a bug. |
 | `cmp.siterules` | This is the component that makes filtering-by-default defensible rather than merely aggressive. |
 | `cmp.diag` | 0008's central claim -- that a keystroke landing on a page reaches the shell -- cannot be checked by reading code or looking at the window, because... |
+| `cmp.modeprofile` | Mode is fixed for the lifetime of the process. Anything that wants to vary it must go through App.RestartInto. |
+| `cmp.sessionstore` | Exists to make d.mode-switch-restarts affordable. A browser that loses your tabs when you change a setting is one nobody changes the setting on. |
+| `cmp.gesturescript` | The only place a pointer gesture can be recognised, per k.mouse-input-never-reaches-wpf. |
 
-### Commits (8)
+### Commits (9)
 
 | id | one-line |
 | --- | --- |
@@ -379,3 +432,4 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 | `commit.0005` | Replaced the developer status strip with a real taskbar: navigation, a measured memory readout in plain language, and a low-power toggle. Low power... |
 | `commit.0004` | Snapshot capture at blur, scroll replay on restore, placeholder painting during rebuild, and teardown enabled by default gated on holding a snapshot.... |
 | `commit.0008` | Browser keyboard shortcuts wired on both delivery paths and verified through the real OS input stack; low-power toggle removed and lean made the... |
+| `commit.0009` | Immersion added as the opposite pole to browse: real device fullscreen, generous recency-chain budget, filtering off, GPU and anti-throttling... |

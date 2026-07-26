@@ -44,6 +44,41 @@ public sealed class SnapshotStore
     public bool Has(Guid tabId) => _snapshots.ContainsKey(tabId);
 
     /// <summary>
+    /// Re-adopts a screenshot left on disk by a previous run, for a tab restored
+    /// from a session. Returns false when there is nothing to adopt, which is
+    /// the ordinary case for a tab that was never blurred while live.
+    ///
+    /// The scroll offset is deliberately NOT restored here. It was captured in a
+    /// process that has exited and was never persisted, so claiming it would be
+    /// a lie about restore fidelity — precisely the over-promise that makes
+    /// people distrust every other tab suspender (p.lossy-restore). The image is
+    /// real and is worth having; the offset is not available and is not faked.
+    /// </summary>
+    public bool Adopt(BrowserTab tab)
+    {
+        var path = Path.Combine(_root, $"{tab.Id:N}.png");
+        if (!File.Exists(path)) return false;
+
+        try
+        {
+            if (new FileInfo(path).Length == 0) return false;
+        }
+        catch
+        {
+            return false;
+        }
+
+        _snapshots[tab.Id] = new TabSnapshot
+        {
+            ImagePath = path,
+            CapturedUtc = File.GetLastWriteTimeUtc(path)
+        };
+
+        tab.SnapshotPath = $"{path}?t={DateTime.UtcNow.Ticks}";
+        return true;
+    }
+
+    /// <summary>
     /// Screenshots the tab and records its scroll offset. Returns false if the
     /// tab could not be captured, in which case the caller should prefer
     /// suspension over teardown — evicting a tab we cannot repaint is exactly

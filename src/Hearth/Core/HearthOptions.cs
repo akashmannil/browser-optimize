@@ -12,15 +12,18 @@ public sealed record HearthOptions
     /// How many tabs may hold a full renderer at once. Activating a tab beyond
     /// this evicts the lowest-scoring live tab (see <see cref="EvictionPolicy"/>).
     ///
-    /// 3 since commit 0008, down from 6. The number moved because the mode it
-    /// describes moved: up to 0007 this was the *normal* budget and 2 was the
-    /// low-power one behind a toggle. Browsing now runs at the lean setting by
-    /// default (d.lean-is-the-default), so this value is the lean one. Three
-    /// supports the pattern that is most of actual browsing -- the thing you are
-    /// reading, the thing you are referring to, and one more -- while still
-    /// binding hard enough to matter at realistic tab counts.
+    /// 3 in browse since commit 0008, down from 6. The number moved because the
+    /// mode it describes moved: up to 0007 this was the *normal* budget and 2
+    /// was the low-power one behind a toggle. Browsing now runs at the lean
+    /// setting by default (d.lean-is-the-default). Three supports the pattern
+    /// that is most of actual browsing -- the thing you are reading, the thing
+    /// you are referring to, and one more -- while still binding hard enough to
+    /// matter at realistic tab counts.
+    ///
+    /// Defaults from <see cref="Profile"/>, so immersion's looser chain of 5
+    /// arrives through the same field rather than through a second one.
     /// </summary>
-    public int LiveTabBudget { get; init; } = 3;
+    public int LiveTabBudget { get; init; } = ModeProfile.Browse.LiveBudget;
 
     /// <summary>
     /// Chromium's cap on concurrent renderer processes, passed via
@@ -64,10 +67,17 @@ public sealed record HearthOptions
     /// </summary>
     public bool ProcessPerSite { get; init; }
 
+    /// <summary>
+    /// The mode this process is running in. Fixed at construction because the
+    /// browser switches it implies are fixed at environment creation
+    /// (k.browser-args-fixed-at-creation).
+    /// </summary>
+    public ModeProfile Profile { get; init; } = ModeProfile.Browse;
+
     /// <summary>Assembles the Chromium switches for the shared environment.</summary>
     public string BrowserArguments()
     {
-        var args = new List<string>();
+        var args = new List<string>(Profile.BrowserArguments);
         if (RendererProcessLimit is { } limit) args.Add($"--renderer-process-limit={limit}");
         if (ProcessPerSite) args.Add("--process-per-site");
         return string.Join(' ', args);
@@ -104,10 +114,24 @@ public sealed record HearthOptions
     ///
     /// Kept switchable (HEARTH_BLOCK_FRAMES=0) because it is the control run for
     /// every memory measurement that claims filtering is what did the work.
+    ///
+    /// Off in immersion (0009): embedded players are the point of that mode.
     /// </summary>
-    public bool BlockThirdPartyFrames { get; init; } = true;
+    public bool BlockThirdPartyFrames { get; init; } = ModeProfile.Browse.FilterContent;
 
     public static HearthOptions Default { get; } = new();
+
+    /// <summary>Options for a mode, before environment overrides are applied.</summary>
+    public static HearthOptions For(HearthMode mode)
+    {
+        var profile = ModeProfile.For(mode);
+        return Default with
+        {
+            Profile = profile,
+            LiveTabBudget = profile.LiveBudget,
+            BlockThirdPartyFrames = profile.FilterContent
+        };
+    }
 
     /// <summary>
     /// Reads overrides from the environment so memory configurations can be A/B
@@ -116,10 +140,13 @@ public sealed record HearthOptions
     /// mistake commit 0002 made in a different form.
     ///
     ///   HEARTH_LIVE_BUDGET=6   HEARTH_RENDERER_LIMIT=8   HEARTH_PROCESS_PER_SITE=1
+    ///
+    /// The mode supplies the baseline and the environment overrides it, in that
+    /// order, so a benchmark can hold a mode fixed and vary one thing.
     /// </summary>
-    public static HearthOptions FromEnvironment()
+    public static HearthOptions FromEnvironment(HearthMode mode = HearthMode.Browse)
     {
-        var options = Default;
+        var options = For(mode);
 
         if (int.TryParse(Environment.GetEnvironmentVariable("HEARTH_LIVE_BUDGET"), out var budget)
             && budget > 0)

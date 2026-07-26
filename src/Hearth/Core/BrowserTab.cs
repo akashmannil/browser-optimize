@@ -14,17 +14,24 @@ namespace Hearth.Core;
 /// </summary>
 public sealed class BrowserTab : INotifyPropertyChanged
 {
-    private string _title = "New tab";
+    private const string DefaultTitle = "New tab";
+
+    private string _title = DefaultTitle;
     private string _url;
     private TabState _state = TabState.Cold;
     private WebView2? _view;
     private string? _snapshotPath;
     private int _blockedCount;
 
-    public BrowserTab(string url)
+    /// <param name="id">
+    /// Supplied only when restoring a session. A tab's snapshot lives at
+    /// shots/{id}.png, so carrying the id across a restart is what lets the
+    /// rebuilt tab find its own last frame; a fresh id would orphan the file.
+    /// </param>
+    public BrowserTab(string url, Guid? id = null)
     {
         _url = url;
-        Id = Guid.NewGuid();
+        Id = id ?? Guid.NewGuid();
         CreatedUtc = DateTime.UtcNow;
         LastActivatedUtc = DateTime.MinValue;
     }
@@ -105,8 +112,26 @@ public sealed class BrowserTab : INotifyPropertyChanged
         internal set => Set(ref _view, value);
     }
 
-    /// <summary>Host for the tab's short display label in the strip.</summary>
-    public string DisplayLabel => Title.Length <= 24 ? Title : Title[..23] + "…";
+    /// <summary>
+    /// The tab's short label in the strip.
+    ///
+    /// Falls back to the host when no real title is known. That case used to be
+    /// rare — only a background tab opened and never visited — but session
+    /// restore made it the common one: every restored tab is cold, so a whole
+    /// strip of them would otherwise read "New tab", "New tab", "New tab".
+    /// The host is what a person actually recognises a page by.
+    /// </summary>
+    public string DisplayLabel
+    {
+        get
+        {
+            var text = string.IsNullOrWhiteSpace(Title) || Title == DefaultTitle
+                ? HostLabel
+                : Title;
+
+            return text.Length <= 24 ? text : text[..23] + "…";
+        }
+    }
 
     /// <summary>
     /// Path to this tab's most recent screenshot, or null if it has never been
@@ -135,7 +160,14 @@ public sealed class BrowserTab : INotifyPropertyChanged
         field = value;
         OnPropertyChanged(name);
         if (name is nameof(Title)) OnPropertyChanged(nameof(DisplayLabel));
-        if (name is nameof(Url)) OnPropertyChanged(nameof(HostLabel));
+        if (name is nameof(Url))
+        {
+            OnPropertyChanged(nameof(HostLabel));
+
+            // DisplayLabel falls back to the host, so it changes with the URL
+            // too whenever the tab has no real title yet.
+            OnPropertyChanged(nameof(DisplayLabel));
+        }
         return true;
     }
 

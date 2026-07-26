@@ -41,6 +41,12 @@ public enum BrowserCommand
     ToggleGrid,
 
     /// <summary>
+    /// Restart into, or out of, immersion mode. This one genuinely relaunches
+    /// the process — see k.browser-args-fixed-at-creation.
+    /// </summary>
+    ToggleImmersion,
+
+    /// <summary>
     /// Escape. Deliberately NOT bound unconditionally: Escape belongs to the
     /// page (stop loading, close a lightbox, leave a text field) unless a
     /// Hearth surface is up to receive it. The dispatcher decides, and declines

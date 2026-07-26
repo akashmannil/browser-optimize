@@ -92,11 +92,16 @@
 
             <StackPanel Grid.Column="1" Orientation="Horizontal"
                         VerticalAlignment="Center" Margin="10,0,8,0">
+                <Button x:Name="ImmersionButton"
+                        Style="{StaticResource IconButton}"
+                        Content="&#xE740;" FontSize="13"
+                        ToolTip="Immersion"
+                        Click="Immersion_Click" />
                 <Button x:Name="BigPictureButton"
                         Style="{StaticResource IconButton}"
                         Content="&#xE71B;" FontSize="13"
                         Margin="4,0,0,0"
-                        ToolTip="All tabs  ·  F11"
+                        ToolTip="All tabs  ·  F9"
                         Click="BigPicture_Click" />
                 <Button x:Name="ThemeButton"
                         Style="{StaticResource IconButton}"

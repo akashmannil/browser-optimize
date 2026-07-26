@@ -30,6 +30,13 @@ public partial class MainWindow : Window
     private long _peakBytes;
     private WindowState _stateBeforeBigPicture = WindowState.Normal;
 
+    private readonly SessionStore _session = new();
+
+    /// <summary>Set while restarting, so the exit handler does not fight it.</summary>
+    private bool _restarting;
+
+    private bool Immersive => App.Mode == HearthMode.Immersion;
+
     /// <summary>Guards against SelectionChanged firing while we set the selection.</summary>
     private bool _syncing;
 
@@ -52,12 +59,18 @@ public partial class MainWindow : Window
         MaximiseFix.Attach(this);
 
         Loaded += OnLoaded;
+        Closing += OnClosing;
         StateChanged += (_, _) => UpdateMaximiseGlyph();
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
-        _tabs = new TabManager(ContentHost, HearthOptions.FromEnvironment());
+        // A mode switch relaunches the process, and the outgoing instance still
+        // holds the WebView2 user-data folder. Creating the environment before
+        // it lets go fails outright, so wait for the handover first.
+        App.AwaitHandover();
+
+        _tabs = new TabManager(ContentHost, HearthOptions.FromEnvironment(App.Mode));
         _tabs.Changed += (_, _) => Dispatcher.Invoke(Sync);
         _tabs.Rehydrating += (_, tab) => Dispatcher.Invoke(() => ShowPlaceholder(tab));
         _tabs.Rehydrated += (_, _) => Dispatcher.InvokeAsync(async () =>
@@ -76,12 +89,29 @@ public partial class MainWindow : Window
         {
             if (tab.View is { } view) _router.Attach(view);
         };
+        _tabs.Gesture += (_, gesture) => Dispatcher.Invoke(() => OnGesture(gesture));
 
         TabStrip.ItemsSource = _tabs.Tabs;
         TabWall.ItemsSource = _tabs.Tabs;
 
-        var startup = Environment.GetCommandLineArgs().Skip(1).ToArray();
-        if (startup.Length == 0)
+        ApplyMode();
+
+        var startup = App.StartupUrls();
+
+        // A saved session takes precedence over the default home page but not
+        // over URLs asked for explicitly on the command line.
+        if (startup.Length == 0 && _session.Load() is { } saved)
+        {
+            var active = _tabs.RestoreSession(saved);
+
+            // Consume the file immediately. If restoring is what crashes us, a
+            // session left on disk would reopen the same tabs on every launch
+            // and the browser would never start again.
+            _session.Clear();
+
+            if (active is not null) await _tabs.ActivateAsync(active);
+        }
+        else if (startup.Length == 0)
         {
             _tabs.Open(HomeUrl);
         }
@@ -110,7 +140,9 @@ public partial class MainWindow : Window
         UpdateMaximiseGlyph();
 
         var version = await _tabs.GetRuntimeVersionAsync();
-        Title = $"Hearth {Dash} WebView2 {version}";
+        Title = Immersive
+            ? $"Hearth {Dash} immersion {Dash} WebView2 {version}"
+            : $"Hearth {Dash} WebView2 {version}";
 
         // The keyboard hook is the one thing here that reaches into the SDK's
         // internals, so a failure is reported rather than left to be discovered
@@ -119,6 +151,97 @@ public partial class MainWindow : Window
             Debug.WriteLine($"[hearth] page-level shortcuts unavailable: {hookError}");
 
         Sync();
+    }
+
+    // ------------------------------------------------------------------------
+    // Mode
+    // ------------------------------------------------------------------------
+
+    /// <summary>
+    /// Puts the window into the shape the current mode calls for. Called once at
+    /// startup, because mode is fixed for the lifetime of the process
+    /// (k.browser-args-fixed-at-creation) -- there is no live transition to
+    /// animate, which is exactly what makes this simple.
+    /// </summary>
+    private void ApplyMode()
+    {
+        ImmersionButton.ToolTip = Immersive
+            ? "Back to browsing  ·  restarts Hearth  ·  F11"
+            : "Immersion  ·  restarts Hearth into fullscreen  ·  F11";
+        ImmersionButton.Content = Immersive ? "" : "";
+
+        if (!Immersive) return;
+
+        // Device fullscreen: no chrome at all, and the taskbar is covered. 0007
+        // deliberately prevented that because it hid the memory readout; here the
+        // readout is intentionally gone, so there is nothing left to protect.
+        TitleBar.Visibility = Visibility.Collapsed;
+        NavBar.Visibility = Visibility.Collapsed;
+        StatusBar.Visibility = Visibility.Collapsed;
+
+        // Explicitly sized to the monitor rather than maximised. A maximised
+        // window measures the same and still has the taskbar drawn over it --
+        // see k.maximised-is-not-fullscreen, which cost a couple of wrong fixes
+        // before the child-window geometry showed the app had been right all
+        // along and the shell was simply declining to yield.
+        ResizeMode = ResizeMode.NoResize;
+        MaximiseFix.Fullscreen(this);
+
+        // Topmost is what makes the shell yield the taskbar, but a topmost
+        // window that stays on top after you alt-tab away is a trap rather than
+        // a feature. Yield it while another app is in front, and take it back on
+        // return.
+        Activated += (_, _) => Topmost = true;
+        Deactivated += (_, _) => Topmost = false;
+    }
+
+    /// <summary>
+    /// Leaves this mode for the other one, by relaunching. The session is
+    /// written first: everything in memory is about to be discarded, and losing
+    /// a user's tabs because they changed a setting would make the setting
+    /// unusable.
+    /// </summary>
+    private void RestartInto(HearthMode mode)
+    {
+        if (_tabs is null || _restarting) return;
+        _restarting = true;
+
+        _session.Save(_tabs.CaptureSession());
+        App.RestartInto(mode);
+    }
+
+    private void Immersion_Click(object sender, RoutedEventArgs e) =>
+        RestartInto(Immersive ? HearthMode.Browse : HearthMode.Immersion);
+
+    /// <summary>
+    /// Tabs are saved on the way out so an ordinary quit restores like a mode
+    /// switch does. A restart has already written a better session than this one
+    /// (it knows which tab was active at the moment of the switch), so it skips.
+    /// </summary>
+    private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
+    {
+        if (_restarting || _tabs is null) return;
+        _session.Save(_tabs.CaptureSession());
+    }
+
+    // ------------------------------------------------------------------------
+    // Gestures
+    //
+    // These arrive as web messages from an injected listener, because mouse
+    // input over a page never reaches WPF (k.mouse-input-never-reaches-wpf).
+    // ------------------------------------------------------------------------
+
+    private void OnGesture(string gesture)
+    {
+        Diag.Log($"gesture {gesture}");
+
+        switch (gesture)
+        {
+            case "tab-next": Execute(BrowserCommand.NextTab, 0); break;
+            case "tab-prev": Execute(BrowserCommand.PreviousTab, 0); break;
+            case "back": Execute(BrowserCommand.Back, 0); break;
+            case "forward": Execute(BrowserCommand.Forward, 0); break;
+        }
     }
 
     // ------------------------------------------------------------------------
@@ -193,6 +316,10 @@ public partial class MainWindow : Window
 
             case BrowserCommand.ToggleGrid:
                 _ = SetBigPictureAsync(BigPicture.Visibility != Visibility.Visible);
+                return true;
+
+            case BrowserCommand.ToggleImmersion:
+                RestartInto(Immersive ? HearthMode.Browse : HearthMode.Immersion);
                 return true;
 
             // Escape is the page's key. Only claim it when a Hearth surface is
@@ -504,7 +631,7 @@ public partial class MainWindow : Window
             TitleBar.Visibility = Visibility.Collapsed;
             NavBar.Visibility = Visibility.Collapsed;
             StatusBar.Visibility = Visibility.Collapsed;
-            WindowState = WindowState.Maximized;
+            if (!Immersive) WindowState = WindowState.Maximized;
 
             // WebView2 paints above all WPF content (k.wpf-airspace), so the
             // host has to leave the screen rather than sit behind the overlay.
@@ -526,20 +653,33 @@ public partial class MainWindow : Window
             await AnimateBigPictureOutAsync();
 
             BigPicture.Visibility = Visibility.Collapsed;
-            TitleBar.Visibility = Visibility.Visible;
-            NavBar.Visibility = Visibility.Visible;
-            StatusBar.Visibility = Visibility.Visible;
             ContentHost.Visibility = Visibility.Visible;
-            WindowState = _stateBeforeBigPicture;
+
+            // Immersion has no chrome to restore, and restoring the window state
+            // would drop it out of fullscreen.
+            if (!Immersive)
+            {
+                TitleBar.Visibility = Visibility.Visible;
+                NavBar.Visibility = Visibility.Visible;
+                StatusBar.Visibility = Visibility.Visible;
+                WindowState = _stateBeforeBigPicture;
+            }
 
             await _tabs.SetBigPictureAsync(false);
 
-            // Leaving the wall means the user surveyed and chose. Everything
-            // else goes back to sleep now rather than waiting for some later
-            // activation to push it past the ceiling.
-            await _tabs.HibernateAllButActiveAsync();
-
-            AddressBar.Focus();
+            // Leaving the wall in BROWSE means the user surveyed and chose, so
+            // everything else goes back to sleep now rather than waiting for a
+            // later activation to push it past the ceiling.
+            //
+            // Immersion deliberately does not do this. Its whole premise is that
+            // the last few tabs in the chain stay warm so stepping between them
+            // is instant; evicting them on every visit to the grid would make the
+            // grid the most expensive thing in the mode.
+            if (!Immersive)
+            {
+                await _tabs.HibernateAllButActiveAsync();
+                AddressBar.Focus();
+            }
         }
 
         Sync();

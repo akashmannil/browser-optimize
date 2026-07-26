@@ -42,9 +42,24 @@ public static class EvictionPolicy
 
     /// <summary>
     /// Returns live tabs ordered worst-first — the eviction queue.
+    ///
+    /// <paramref name="recencyOnly"/> drops the habit term and orders purely by
+    /// when a tab was last looked at. Immersion asks for this because it wants
+    /// "the last few in the chain": the tabs you just came from, in order, so
+    /// stepping back and forth is always instant. Habit weighting is right for a
+    /// working session — a reference doc opened forty times should outrank
+    /// something opened once — but during a lean-back session it answers the
+    /// wrong question, keeping the dashboard checked every morning alive instead
+    /// of the thing being watched two tabs ago.
     /// </summary>
     public static IEnumerable<BrowserTab> EvictionOrder(
-        IEnumerable<BrowserTab> tabs, BrowserTab? active, DateTime nowUtc) =>
-        tabs.Where(t => t.State == TabState.Live && !ReferenceEquals(t, active))
-            .OrderBy(t => Score(t, nowUtc));
+        IEnumerable<BrowserTab> tabs, BrowserTab? active, DateTime nowUtc,
+        bool recencyOnly = false)
+    {
+        var candidates = tabs.Where(t => t.State == TabState.Live && !ReferenceEquals(t, active));
+
+        return recencyOnly
+            ? candidates.OrderBy(t => t.LastActivatedUtc)
+            : candidates.OrderBy(t => Score(t, nowUtc));
+    }
 }

@@ -222,12 +222,15 @@ public sealed class ShortcutRouter
             (Key.D0, true, false, false) => (BrowserCommand.ZoomReset, 0),
             (Key.NumPad0, true, false, false) => (BrowserCommand.ZoomReset, 0),
 
-            // Chrome's "search tabs" chord, pointed at the grid, plus two
-            // unmodified keys so the grid stays reachable from a lean-back
+            // Chrome's "search tabs" chord, pointed at the grid, plus an
+            // unmodified key so the grid stays reachable from a lean-back
             // position where the modifier row is not under anyone's hands.
             (Key.A, true, true, false) => (BrowserCommand.ToggleGrid, 0),
             (Key.F9, false, false, false) => (BrowserCommand.ToggleGrid, 0),
-            (Key.F11, false, false, false) => (BrowserCommand.ToggleGrid, 0),
+
+            // F11 is the fullscreen key everywhere, and immersion is what
+            // fullscreen means here.
+            (Key.F11, false, false, false) => (BrowserCommand.ToggleImmersion, 0),
 
             (Key.Escape, false, false, false) => (BrowserCommand.Dismiss, 0),
 
