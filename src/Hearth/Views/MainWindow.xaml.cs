@@ -151,10 +151,10 @@ public partial class MainWindow : Window
         StartMemorySampling();
         UpdateMaximiseGlyph();
 
-        var version = await _tabs.GetRuntimeVersionAsync();
-        Title = Immersive
-            ? $"Hearth {Dash} immersion {Dash} WebView2 {version}"
-            : $"Hearth {Dash} WebView2 {version}";
+        // The runtime version is a developer detail and belongs in the log, not
+        // in the taskbar. It was in the title because the title had never been
+        // designed; a browser's title is the page you are on.
+        Diag.Log($"WebView2 runtime {await _tabs.GetRuntimeVersionAsync()}");
 
         // The keyboard hook is the one thing here that reaches into the SDK's
         // internals, so a failure is reported rather than left to be discovered
@@ -599,6 +599,7 @@ public partial class MainWindow : Window
         ReloadButton.IsEnabled = core is not null;
 
         SyncShield(active);
+        SyncTitle(active);
 
         // "Awake" and "resting", not "live" and "hibernated". Resting carries
         // the promise that matters: it will be there when you come back.
@@ -634,6 +635,27 @@ public partial class MainWindow : Window
     }
 
     private void Shield_Click(object sender, RoutedEventArgs e) => _tabs?.AllowActiveSite();
+
+    /// <summary>
+    /// "Page title - Hearth", the way every browser does it.
+    ///
+    /// The title is what Alt+Tab and the taskbar preview show, so it is one of
+    /// the few places the app has to state its own name. It previously read
+    /// "Hearth - WebView2 150.0.4078.83", which is a developer's debug string
+    /// wearing the product's clothes and made the app look like a test harness
+    /// rather than a browser.
+    /// </summary>
+    private void SyncTitle(BrowserTab? active)
+    {
+        const string AppName = "Hearth";
+
+        var page = active is null || string.IsNullOrWhiteSpace(active.DisplayLabel)
+            ? null
+            : active.DisplayLabel;
+
+        var name = Immersive ? $"{AppName} {Dash} immersion" : AppName;
+        Title = page is null ? name : $"{page} {Dash} {name}";
+    }
 
     private void StartMemorySampling()
     {

@@ -23,10 +23,25 @@
     <FileVersion>0.2.0.0</FileVersion>
     <InformationalVersion>0.2.0-alpha.1</InformationalVersion>
     <Product>Hearth</Product>
+    <AssemblyTitle>Hearth Browser</AssemblyTitle>
     <Description>A low-resource Windows browser: hibernated is a tab's default state, live is a budgeted exception.</Description>
     <Authors>akashmannil</Authors>
     <Company>akashmannil</Company>
+    <Copyright>Copyright (c) 2026 akashmannil</Copyright>
+
+    <!-- The exe's own icon: what Explorer, Alt+Tab, and a pinned taskbar entry
+         use. Without it Windows falls back to the generic application icon,
+         which is what made the app look anonymous next to real browsers. -->
+    <ApplicationIcon>Assets\hearth.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Also embedded as a WPF resource, because Window.Icon is a separate
+         thing from ApplicationIcon: the former is the icon in the taskbar for
+         a RUNNING window, the latter is the icon on the file. Setting only one
+         leaves the other generic. -->
+    <Resource Include="Assets\hearth.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <!-- Pinned to the 4078 line to match the installed WebView2 Runtime (150.0.4078.x).

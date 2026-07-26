@@ -1,5 +1,7 @@
 # Hearth
 
+![The Hearth icon: an arch with a banked ember inside, shown at 16 to 128 px on dark and light backgrounds](docs/images/icon.png)
+
 A low-resource Windows browser shell built on WebView2.
 
 > **Core bet:** every other browser treats *loaded* as a tab's default state and unloading as an

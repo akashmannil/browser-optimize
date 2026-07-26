@@ -314,7 +314,7 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 
 <!-- GENERATED: node index below is rebuilt from knowledge-graph.json. -->
 
-**99 nodes, 224 edges**, current to commit `0013`. This table is generated from the JSON; edit the JSON, never this table.
+**102 nodes, 229 edges**, current to commit `0014`. This table is generated from the JSON; edit the JSON, never this table.
 
 ### Problems (4)
 
@@ -335,7 +335,7 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 | `c.ram-for-disk-trade` | Disk cost is effectively free at any realistic tab count. 1,000 hibernated tabs would occupy roughly 27 MB. There is no reason to ration snapshots or... |
 | `c.hibernate-by-default` **[core thesis]** | Every other browser treats loaded as default and unloading as an emergency. Chrome Memory Saver and Firefox tab unloading are REACTIVE, triggering... |
 
-### Decisions (22)
+### Decisions (23)
 
 | id | one-line |
 | --- | --- |
@@ -361,6 +361,7 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 | `d.airspace-needs-a-second-window` | k.wpf-airspace makes an in-window overlay invisible the moment a page paints. 0006 solved that for the tab grid by collapsing the content host, which... |
 | `d.snapshot-handoff-covers-the-load` | k.collapsed-host-blocks-initialisation forces the order 'animate, then activate', so the zoom finished and the page load began with nothing on screen... |
 | `d.one-motion-vocabulary` | Before 0013 there were two durations and four easings applied more or less at random, and half the controls had no motion at all. The app read as... |
+| `d.hearth-mark` | It says hearth rather than fire, which is the actual idea: the product is about banking embers and coming back to them, not about burning. An arch is... |
 
 ### Constraints (immovable) (24)
 
@@ -411,7 +412,7 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 | `m.immersion-cost` | Six real sites, every tab activated so the budget binds, one Debug build, 95 s settle. Browse: 3 renderers / 890 MB. Immersion: 20 renderers / 2197... |
 | `m.animation-smoothness` | Tab grid entrance after 0013: 0.7 long frames (>25 ms) per 450 ms entrance across six runs, worst gap 17-78 ms, typically 70-120 fps. The animations... |
 
-### Components (21)
+### Components (22)
 
 | id | one-line |
 | --- | --- |
@@ -436,8 +437,9 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 | `cmp.edgebar` | Never activates and never resizes the owner. Both would undo the fullscreen state the mode depends on. |
 | `cmp.motion` | Only ever targets Opacity or a Transform. |
 | `cmp.framemeter` | Smoothness was the one quality claim in the project that had never been measured. Long-frame count is the headline: mean frame rate saturates at the... |
+| `cmp.icon-generator` | Each size is rendered independently at 16x supersample and downsampled with LANCZOS. Scaling a single 256px master down to 16px produces mud. |
 
-### Commits (13)
+### Commits (14)
 
 | id | one-line |
 | --- | --- |
@@ -454,3 +456,4 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 | `commit.0011` | The address bar no longer keeps showing the previous tab's URL after a switch made while it had keyboard focus. |
 | `commit.0012` | Restored the maximise and immersion buttons, which had been empty strings since 0008, and made every non-ASCII source literal an escape. Labelled the... |
 | `commit.0013` | A shared motion vocabulary applied app-wide, with previously static controls animated and press feedback added. Introduced frame instrumentation... |
+| `commit.0014` | Real application icon (arch-and-ember mark, generated and reproducible), wired as both ApplicationIcon and Window.Icon, plus assembly metadata and a... |

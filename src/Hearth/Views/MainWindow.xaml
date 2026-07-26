@@ -4,6 +4,7 @@
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         Title="Hearth" Height="860" Width="1320"
         MinHeight="480" MinWidth="720"
+        Icon="/Assets/hearth.ico"
         WindowStyle="None"
         AllowsTransparency="False"
         Background="{DynamicResource Bg}"

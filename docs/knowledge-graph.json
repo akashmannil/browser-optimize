@@ -2,7 +2,7 @@
   "project": "hearth",
   "description": "A low-resource Windows browser shell built on WebView2, whose core bet is that hibernated is a tab's default state and live is a budgeted exception.",
   "schema_version": "1.0",
-  "graph_updated_at_commit": "0013",
+  "graph_updated_at_commit": "0014",
   "consumer_notes": "This file is the authoritative machine-readable model of WHY this codebase is shaped the way it is. Source code records what the system does; this graph records the reasoning, the rejected alternatives, and the constraints that must not be violated. Agents should read this before proposing architectural changes. Every node has a stable `id` that is safe to reference in commits, issues, and other documents. When you add a feature, add its nodes/edges here in the same commit.",
   "node_types": {
     "problem": "An observed user-facing or system-level problem the project exists to solve.",
@@ -901,6 +901,33 @@
       "label": "0013 - motion rework",
       "summary": "A shared motion vocabulary applied app-wide, with previously static controls animated and press feedback added. Introduced frame instrumentation, which then disproved three assumptions: drop shadows were halving the frame rate, subtree opacity is not free, and caching the zoomed card to a bitmap cost three times the CPU of the VisualBrush it replaced.",
       "doc": "docs/commits/0013-motion-rework.md"
+    },
+    {
+      "id": "d.hearth-mark",
+      "type": "decision",
+      "label": "The mark is an arch stroke with a banked ember, not a flame",
+      "summary": "A thick arch stroke -- the mouth of a hearth -- with one ember glowing on the floor inside it, on a warm near-black tile. Every size rendered independently at 16x and downsampled, rather than one master scaled down.",
+      "rationale": "It says hearth rather than fire, which is the actual idea: the product is about banking embers and coming back to them, not about burning. An arch is also a single closed geometric form, so it survives 16px, and it is not a shape another browser uses.",
+      "rejected_flame": "What every fast/hot/energy product already uses, so it says nothing, and its silhouette is thin tapering points that turn to mush below about 24px.",
+      "rejected_solid_arch": "Read as a tombstone; adding a bright bar for the hearth floor made it a headstone on a plinth. The error was conceptual, not aesthetic -- a hearth is an OPENING, and a filled shape says the opposite.",
+      "detail": "The tile is warm near-black so it reads as a dark object against both a light and a dark taskbar rather than dissolving into either.",
+      "revisit_if": "A light-mode icon variant is wanted, or the app ships an installer and needs Store-style asset sizes."
+    },
+    {
+      "id": "cmp.icon-generator",
+      "type": "component",
+      "label": "make-icon.py",
+      "file": "tools/make-icon.py",
+      "summary": "Generates src/Hearth/Assets/hearth.ico at 16/24/32/48/64/128/256 and the contact sheet in docs/images/icon.png.",
+      "rationale": "An icon committed as an opaque binary is one nobody can adjust later. The script is the source of truth, and its header records the two rejected directions so they are not re-tried.",
+      "invariant": "Each size is rendered independently at 16x supersample and downsampled with LANCZOS. Scaling a single 256px master down to 16px produces mud."
+    },
+    {
+      "id": "commit.0014",
+      "type": "commit",
+      "label": "0014 - identity",
+      "summary": "Real application icon (arch-and-ember mark, generated and reproducible), wired as both ApplicationIcon and Window.Icon, plus assembly metadata and a browser-style window title. The app no longer shows the generic Windows icon or a WebView2 version string in the taskbar.",
+      "doc": "docs/commits/0014-identity.md"
     }
   ],
   "edges": [
@@ -2094,6 +2121,33 @@
       "from": "cmp.framemeter",
       "rel": "depends_on",
       "to": "cmp.diag"
+    },
+    {
+      "from": "cmp.icon-generator",
+      "rel": "implements",
+      "to": "d.hearth-mark"
+    },
+    {
+      "from": "cmp.icon-generator",
+      "rel": "implements",
+      "to": "commit.0014"
+    },
+    {
+      "from": "d.hearth-mark",
+      "rel": "introduced_in",
+      "to": "commit.0014"
+    },
+    {
+      "from": "d.hearth-mark",
+      "rel": "motivated_by",
+      "to": "c.hibernate-by-default",
+      "note": "Banking embers and returning to them is the thesis the mark is drawn from."
+    },
+    {
+      "from": "d.hearth-mark",
+      "rel": "constrains",
+      "to": "cmp.mainwindow",
+      "note": "Window.Icon and ApplicationIcon are separate settings and both are required."
     }
   ]
 }

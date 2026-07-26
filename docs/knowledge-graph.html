@@ -364,7 +364,7 @@
 
 <script>
 const DATA = {
-  rev: "0013",
+  rev: "0014",
   nodeTypes: {
     problem:"An observed problem the project exists to solve",
     concept:"A mental model used to reason about the system",
@@ -475,6 +475,9 @@ const DATA = {
     {id:"cmp.framemeter",type:"component",label:"FrameMeter",file:"src/Hearth/Views/FrameMeter.cs",summary:"Counts composition frames across an animation and reports rate, CPU cost, and the number of frames longer than 25 ms. Only exists when HEARTH_TRACE=1.",rationale:"Smoothness was the one quality claim in the project that had never been measured. Long-frame count is the headline: mean frame rate saturates at the compositor cap and hides stalls, and process CPU time is too noisy in a process that also hosts a browser."},
     {id:"m.animation-smoothness",type:"metric",label:"Delivered animation smoothness",summary:"Tab grid entrance after 0013: 0.7 long frames (>25 ms) per 450 ms entrance across six runs, worst gap 17-78 ms, typically 70-120 fps. The animations are longer than before and drop fewer frames than before.",status:"measured-0013",instrument:"cmp.framemeter, HEARTH_TRACE=1",caveat:"Debug build on one machine with a high-refresh display, so absolute rates are not portable. Every claim in 0013 rests on a within-run A/B where only one thing varied."},
     {id:"commit.0013",type:"commit",label:"0013 - motion rework",summary:"A shared motion vocabulary applied app-wide, with previously static controls animated and press feedback added. Introduced frame instrumentation, which then disproved three assumptions: drop shadows were halving the frame rate, subtree opacity is not free, and caching the zoomed card to a bitmap cost three times the CPU of the VisualBrush it replaced.",doc:"docs/commits/0013-motion-rework.md"},
+    {id:"d.hearth-mark",type:"decision",label:"The mark is an arch stroke with a banked ember, not a flame",summary:"A thick arch stroke -- the mouth of a hearth -- with one ember glowing on the floor inside it, on a warm near-black tile. Every size rendered independently at 16x and downsampled, rather than one master scaled down.",rationale:"It says hearth rather than fire, which is the actual idea: the product is about banking embers and coming back to them, not about burning. An arch is also a single closed geometric form, so it survives 16px, and it is not a shape another browser uses.",rejected_flame:"What every fast/hot/energy product already uses, so it says nothing, and its silhouette is thin tapering points that turn to mush below about 24px.",rejected_solid_arch:"Read as a tombstone; adding a bright bar for the hearth floor made it a headstone on a plinth. The error was conceptual, not aesthetic -- a hearth is an OPENING, and a filled shape says the opposite.",detail:"The tile is warm near-black so it reads as a dark object against both a light and a dark taskbar rather than dissolving into either.",revisit_if:"A light-mode icon variant is wanted, or the app ships an installer and needs Store-style asset sizes."},
+    {id:"cmp.icon-generator",type:"component",label:"make-icon.py",file:"tools/make-icon.py",summary:"Generates src/Hearth/Assets/hearth.ico at 16/24/32/48/64/128/256 and the contact sheet in docs/images/icon.png.",rationale:"An icon committed as an opaque binary is one nobody can adjust later. The script is the source of truth, and its header records the two rejected directions so they are not re-tried.",invariant:"Each size is rendered independently at 16x supersample and downsampled with LANCZOS. Scaling a single 256px master down to 16px produces mud."},
+    {id:"commit.0014",type:"commit",label:"0014 - identity",summary:"Real application icon (arch-and-ember mark, generated and reproducible), wired as both ApplicationIcon and Window.Icon, plus assembly metadata and a browser-style window title. The app no longer shows the generic Windows icon or a WebView2 version string in the taskbar.",doc:"docs/commits/0014-identity.md"},
   ],
   edges: [
     {from:"p.tab-hoarding",rel:"motivated_by",to:"p.archive-blackhole",note:"Users resist archiving precisely because archives are not trustworthy retrieval."},
@@ -701,6 +704,11 @@ const DATA = {
     {from:"d.one-motion-vocabulary",rel:"introduced_in",to:"commit.0013"},
     {from:"m.animation-smoothness",rel:"introduced_in",to:"commit.0013"},
     {from:"cmp.framemeter",rel:"depends_on",to:"cmp.diag"},
+    {from:"cmp.icon-generator",rel:"implements",to:"d.hearth-mark"},
+    {from:"cmp.icon-generator",rel:"implements",to:"commit.0014"},
+    {from:"d.hearth-mark",rel:"introduced_in",to:"commit.0014"},
+    {from:"d.hearth-mark",rel:"motivated_by",to:"c.hibernate-by-default",note:"Banking embers and returning to them is the thesis the mark is drawn from."},
+    {from:"d.hearth-mark",rel:"constrains",to:"cmp.mainwindow",note:"Window.Icon and ApplicationIcon are separate settings and both are required."},
   ]
 };
 
