@@ -15,7 +15,7 @@ namespace Hearth.Core;
 /// INVARIANT (d.shared-environment): no code anywhere may call
 /// EnsureCoreWebView2Async without the environment this class hands out. One
 /// environment means one browser process hosting N renderers. Letting a control
-/// self-initialise gives it its OWN browser process, silently, with no error —
+/// self-initialise gives it its OWN browser process, silently, with no error --
 /// turning a 20-tab session into 20 browser processes and destroying the memory
 /// budget the project exists to enforce. Realisation is funnelled through
 /// <see cref="RealiseAsync"/> for exactly this reason.
@@ -37,7 +37,7 @@ public sealed class TabManager
 
     /// <summary>
     /// Closed tabs, most recent first, for Ctrl+Shift+T. Bounded because this is
-    /// an undo buffer and not a history feature — an unbounded one would quietly
+    /// an undo buffer and not a history feature -- an unbounded one would quietly
     /// retain every URL of the session with no way to clear it.
     /// </summary>
     private readonly List<ClosedTab> _closed = [];
@@ -319,7 +319,7 @@ public sealed class TabManager
 
     /// <summary>
     /// Declines a request and tells the owning tab it happened. The count is
-    /// what the shield binds to — a filter nobody can see is indistinguishable
+    /// what the shield binds to -- a filter nobody can see is indistinguishable
     /// from a broken page (d.filtering-needs-an-escape-hatch).
     /// </summary>
     private void Refuse(
@@ -371,7 +371,7 @@ public sealed class TabManager
 
     /// <summary>
     /// Adds a tab. Note it starts <see cref="TabState.Cold"/> and holds no
-    /// renderer — a tab only costs memory once it is actually activated. This
+    /// renderer -- a tab only costs memory once it is actually activated. This
     /// is the default-state inversion in its smallest form: opening 200 tabs
     /// costs 200 URLs, not 200 renderers.
     /// </summary>
@@ -401,7 +401,7 @@ public sealed class TabManager
             // Capture the OUTGOING tab before anything else touches visibility.
             // CapturePreviewAsync can only photograph a controller that is still
             // visible and painted (k.capture-requires-live), so blur is the last
-            // moment a snapshot can be taken — by eviction time the tab has long
+            // moment a snapshot can be taken -- by eviction time the tab has long
             // since been collapsed and there is nothing left to photograph.
             if (Active is { } outgoing
                 && !ReferenceEquals(outgoing, tab)
@@ -438,7 +438,7 @@ public sealed class TabManager
     /// <summary>
     /// Evicts lowest-scoring live tabs until the budget is satisfied. Called
     /// after every activation, so the ceiling holds by construction rather than
-    /// reactively under memory pressure — which is the difference between this
+    /// reactively under memory pressure -- which is the difference between this
     /// and Chrome Memory Saver (c.hibernate-by-default).
     /// </summary>
     private async Task EnforceBudgetAsync()
@@ -465,7 +465,7 @@ public sealed class TabManager
 
         tab.View.Visibility = Visibility.Collapsed;
 
-        // No capture here — by this point the tab was collapsed at blur and
+        // No capture here -- by this point the tab was collapsed at blur and
         // cannot be photographed. We rely on the snapshot taken when the user
         // switched away from it, which is the only moment one was available.
         //
@@ -481,7 +481,7 @@ public sealed class TabManager
 
         try
         {
-            // TrySuspend legitimately returns false — media playback, downloads
+            // TrySuspend legitimately returns false -- media playback, downloads
             // and active connections all block suspension. A refusal is a normal
             // outcome, not an error: the tab simply stays Live and remains a
             // candidate at the next activation.
@@ -635,7 +635,7 @@ public sealed class TabManager
 
     /// <summary>
     /// Reopens the most recently closed tab at the position it was closed from.
-    /// Only URL and title come back — the renderer was destroyed and its
+    /// Only URL and title come back -- the renderer was destroyed and its
     /// snapshot deliberately deleted with it, so this is a fresh load, not a
     /// restore. Claiming otherwise would be exactly the over-promise that makes
     /// people distrust every other tab suspender (p.lossy-restore).

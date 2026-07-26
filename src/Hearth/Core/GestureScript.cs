@@ -25,6 +25,13 @@ internal static class GestureScript
     /// <summary>Horizontal travel, in CSS pixels, before a swipe counts.</summary>
     private const int SwipeThreshold = 90;
 
+    /// <summary>
+    /// How close to an edge, in CSS pixels, counts as reaching for the chrome.
+    /// Small enough that it takes intent, large enough to be hittable by
+    /// slamming the pointer at the edge, which is how people actually do it.
+    /// </summary>
+    private const int EdgeThreshold = 4;
+
     public static string Source { get; } = $$"""
         (function () {
           if (window.__hearthGestures) return;
@@ -77,6 +84,21 @@ internal static class GestureScript
 
           window.addEventListener('auxclick', function (e) {
             if (e.button === 3 || e.button === 4) e.preventDefault();
+          }, true);
+
+          // Edge proximity, for immersion's sliding chrome. The shell cannot
+          // work this out for itself: the pointer is over a window it does not
+          // own, so WPF sees no mouse position at all.
+          //
+          // Only transitions are posted, not every move, so an ordinary drag
+          // across the page costs one comparison per event and nothing else.
+          var lastEdge = 'none';
+          window.addEventListener('mousemove', function (e) {
+            var edge = 'none';
+            if (e.clientY <= {{EdgeThreshold}}) edge = 'top';
+            else if (e.clientY >= window.innerHeight - {{EdgeThreshold}}) edge = 'bottom';
+
+            if (edge !== lastEdge) { lastEdge = edge; post('edge-' + edge); }
           }, true);
         })();
         """;

@@ -9,7 +9,7 @@ namespace Hearth.Views;
 /// Loads a tab snapshot for display in the Big Picture wall.
 ///
 /// Paths arrive with a "?t=ticks" suffix so bindings invalidate when a tab is
-/// re-captured — the file path itself is stable and would never signal a change.
+/// re-captured -- the file path itself is stable and would never signal a change.
 /// The suffix is stripped before touching the filesystem.
 ///
 /// Decoding is capped at 480px wide: the wall shows dozens of thumbnails at a few

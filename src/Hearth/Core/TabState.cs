@@ -29,7 +29,7 @@ public enum TabState
     Hibernated = 2,
 
     /// <summary>
-    /// No controller at all — the tab is a URL, a screenshot and serialised
+    /// No controller at all -- the tab is a URL, a screenshot and serialised
     /// page state on disk. Costs essentially nothing in memory. This is the
     /// DEFAULT state for a tab the user is not circling back to, which is the
     /// inversion the whole project rests on (c.hibernate-by-default).

@@ -10,7 +10,7 @@ namespace Hearth.Views;
 ///
 /// A WindowStyle="None" window maximises to the full monitor bounds, not the
 /// work area, so it covers the taskbar and silently swallows whatever sits at
-/// the bottom of the layout — here, the memory readout. Windows only asks about
+/// the bottom of the layout -- here, the memory readout. Windows only asks about
 /// this once, via WM_GETMINMAXINFO, so the correct size has to be supplied in
 /// the answer rather than corrected afterwards.
 ///
@@ -28,8 +28,8 @@ public static class MaximiseFix
     /// MAXIMISED IS NOT FULLSCREEN, and that distinction is the whole of this
     /// method (k.maximised-is-not-fullscreen). Setting WindowState.Maximized and
     /// answering WM_GETMINMAXINFO with the monitor bounds does produce a window
-    /// measuring exactly 1920x1080 at 0,0 — verified down through every WebView2
-    /// child HWND — and the taskbar still draws on top of it. To the shell, a
+    /// measuring exactly 1920x1080 at 0,0 -- verified down through every WebView2
+    /// child HWND -- and the taskbar still draws on top of it. To the shell, a
     /// maximised window is by definition one that respects the work area, so it
     /// is never a candidate for the fullscreen treatment that hides the taskbar.
     ///
@@ -86,7 +86,7 @@ public static class MaximiseFix
 
         var mmi = Marshal.PtrToStructure<MINMAXINFO>(lParam);
 
-        // Work area, expressed relative to the monitor's own origin — the values
+        // Work area, expressed relative to the monitor's own origin -- the values
         // are monitor-local, so a secondary display at a negative offset still
         // lands correctly. Immersion does not come through here at all; it uses
         // Fullscreen above, for the reason documented there.

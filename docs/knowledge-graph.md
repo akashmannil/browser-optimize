@@ -314,7 +314,7 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 
 <!-- GENERATED: node index below is rebuilt from knowledge-graph.json. -->
 
-**85 nodes, 189 edges**, current to commit `0011`. This table is generated from the JSON; edit the JSON, never this table.
+**90 nodes, 204 edges**, current to commit `0012`. This table is generated from the JSON; edit the JSON, never this table.
 
 ### Problems (4)
 
@@ -335,7 +335,7 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 | `c.ram-for-disk-trade` | Disk cost is effectively free at any realistic tab count. 1,000 hibernated tabs would occupy roughly 27 MB. There is no reason to ration snapshots or... |
 | `c.hibernate-by-default` **[core thesis]** | Every other browser treats loaded as default and unloading as an emergency. Chrome Memory Saver and Firefox tab unloading are REACTIVE, triggering... |
 
-### Decisions (19)
+### Decisions (21)
 
 | id | one-line |
 | --- | --- |
@@ -358,8 +358,10 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 | `d.single-click-opens` | This was the single biggest reason the grid read as broken. Nothing else in this app, and no tab switcher anyone has used, needs two clicks to pick a... |
 | `d.zoom-connects-card-to-page` | The transition should make the page you land on visibly the card you chose. A cut, or a plain crossfade, leaves the user to re-establish where they... |
 | `d.address-bar-follows-the-tab` | Guarding on focus alone was wrong because focus SURVIVES a tab switch: Ctrl+T focuses the bar, and every switch after that (Ctrl+Tab, Ctrl+1... |
+| `d.airspace-needs-a-second-window` | k.wpf-airspace makes an in-window overlay invisible the moment a page paints. 0006 solved that for the tab grid by collapsing the content host, which... |
+| `d.snapshot-handoff-covers-the-load` | k.collapsed-host-blocks-initialisation forces the order 'animate, then activate', so the zoom finished and the page load began with nothing on screen... |
 
-### Constraints (immovable) (19)
+### Constraints (immovable) (20)
 
 | id | one-line |
 | --- | --- |
@@ -382,6 +384,7 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 | `k.maximised-is-not-fullscreen` | Real fullscreen is WindowState.Normal, Topmost, sized explicitly to the monitor in DIPs. MaximiseFix.Fullscreen does this; the WM_GETMINMAXINFO hook... |
 | `k.mouse-input-never-reaches-wpf` | Pointer gestures can only be recognised inside the page, by an injected listener posting through window.chrome.webview. |
 | `k.collapsed-host-blocks-initialisation` | MainWindow.RestoreShell runs, including a forced UpdateLayout, before any activation triggered from the grid. |
+| `k.non-ascii-literals-do-not-survive-tooling` | Every hand-written C# file under src/Hearth contains zero bytes above 0x7F. Checkable in one line: sum(1 for b in open(path,"rb").read() if b > 127)... |
 
 ### WebView2 APIs (4)
 
@@ -402,7 +405,7 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 | `m.filtering-reclaim` | One tab on stackoverflow.com, one Debug build, 90 s settle, only HEARTH_BLOCK_FRAMES varying. Filtering on: 1 renderer / 719 MB. Filtering off... |
 | `m.immersion-cost` | Six real sites, every tab activated so the budget binds, one Debug build, 95 s settle. Browse: 3 renderers / 890 MB. Immersion: 20 renderers / 2197... |
 
-### Components (18)
+### Components (19)
 
 | id | one-line |
 | --- | --- |
@@ -424,8 +427,9 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 | `cmp.modeprofile` | Mode is fixed for the lifetime of the process. Anything that wants to vary it must go through App.RestartInto. |
 | `cmp.sessionstore` | Exists to make d.mode-switch-restarts affordable. A browser that loses your tabs when you change a setting is one nobody changes the setting on. |
 | `cmp.gesturescript` | The only place a pointer gesture can be recognised, per k.mouse-input-never-reaches-wpf. |
+| `cmp.edgebar` | Never activates and never resizes the owner. Both would undo the fullscreen state the mode depends on. |
 
-### Commits (11)
+### Commits (12)
 
 | id | one-line |
 | --- | --- |
@@ -440,3 +444,4 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 | `commit.0009` | Immersion added as the opposite pole to browse: real device fullscreen, generous recency-chain budget, filtering off, GPU and anti-throttling... |
 | `commit.0010` | Found and fixed the reason picking a tab from the grid hung: activation was started while the content host was still collapsed. Grid no longer... |
 | `commit.0011` | The address bar no longer keeps showing the previous tab's URL after a switch made while it had keyboard focus. |
+| `commit.0012` | Restored the maximise and immersion buttons, which had been empty strings since 0008, and made every non-ASCII source literal an escape. Labelled the... |

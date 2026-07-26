@@ -9,7 +9,7 @@ namespace Hearth.Core;
 /// recency is weighted by how often the tab has actually been returned to
 /// (c.tab-taxonomy).
 ///
-/// This class is where c.refindability lands later — a filtered dashboard view
+/// This class is where c.refindability lands later -- a filtered dashboard view
 /// or a half-filled form should resist eviction far harder than a homepage,
 /// because the cost of being wrong is not a reload but a loss.
 /// </summary>
@@ -23,7 +23,7 @@ public static class EvictionPolicy
     public static double Score(BrowserTab tab, DateTime nowUtc)
     {
         // Never activated: opened in the background and never visited. These are
-        // the cheapest possible eviction victims — the user has no working
+        // the cheapest possible eviction victims -- the user has no working
         // context in them to lose.
         if (tab.LastActivatedUtc == DateTime.MinValue) return double.NegativeInfinity;
 
@@ -41,14 +41,14 @@ public static class EvictionPolicy
     }
 
     /// <summary>
-    /// Returns live tabs ordered worst-first — the eviction queue.
+    /// Returns live tabs ordered worst-first -- the eviction queue.
     ///
     /// <paramref name="recencyOnly"/> drops the habit term and orders purely by
     /// when a tab was last looked at. Immersion asks for this because it wants
     /// "the last few in the chain": the tabs you just came from, in order, so
     /// stepping back and forth is always instant. Habit weighting is right for a
-    /// working session — a reference doc opened forty times should outrank
-    /// something opened once — but during a lean-back session it answers the
+    /// working session -- a reference doc opened forty times should outrank
+    /// something opened once -- but during a lean-back session it answers the
     /// wrong question, keeping the dashboard checked every morning alive instead
     /// of the thing being watched two tabs ago.
     /// </summary>

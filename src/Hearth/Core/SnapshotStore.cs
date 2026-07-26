@@ -23,7 +23,7 @@ public sealed record TabSnapshot
 /// visually indistinguishable from a live one (p.lossy-restore).
 ///
 /// TIMING (k.capture-requires-live): capture MUST happen while the WebView2 is
-/// still realised and has painted — i.e. at blur, immediately before eviction,
+/// still realised and has painted -- i.e. at blur, immediately before eviction,
 /// never after. There is no way to screenshot a controller that has been
 /// disposed, so a missed capture is permanent for that tab.
 /// </summary>
@@ -50,7 +50,7 @@ public sealed class SnapshotStore
     ///
     /// The scroll offset is deliberately NOT restored here. It was captured in a
     /// process that has exited and was never persisted, so claiming it would be
-    /// a lie about restore fidelity — precisely the over-promise that makes
+    /// a lie about restore fidelity -- precisely the over-promise that makes
     /// people distrust every other tab suspender (p.lossy-restore). The image is
     /// real and is worth having; the offset is not available and is not faked.
     /// </summary>
@@ -81,7 +81,7 @@ public sealed class SnapshotStore
     /// <summary>
     /// Screenshots the tab and records its scroll offset. Returns false if the
     /// tab could not be captured, in which case the caller should prefer
-    /// suspension over teardown — evicting a tab we cannot repaint is exactly
+    /// suspension over teardown -- evicting a tab we cannot repaint is exactly
     /// the papercut this class exists to prevent.
     /// </summary>
     public async Task<bool> CaptureAsync(BrowserTab tab)
@@ -102,7 +102,7 @@ public sealed class SnapshotStore
             // Buffer in memory first. Writing the stream straight to a FileStream
             // leaves a 0-byte file behind whenever the capture yields nothing,
             // and a 0-byte PNG is indistinguishable from a real snapshot at the
-            // call site — it would license a teardown we cannot repaint from.
+            // call site -- it would license a teardown we cannot repaint from.
             using var buffer = new MemoryStream();
             await core.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, buffer);
             if (buffer.Length == 0) return false;
@@ -183,7 +183,7 @@ public sealed class SnapshotStore
         catch (Exception ex) { Debug.WriteLine($"[hearth] snapshot delete failed: {ex.Message}"); }
     }
 
-    /// <summary>Total bytes on disk — the "disk" half of the RAM-for-disk trade.</summary>
+    /// <summary>Total bytes on disk -- the "disk" half of the RAM-for-disk trade.</summary>
     public long DiskBytes()
     {
         long total = 0;

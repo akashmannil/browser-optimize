@@ -5,7 +5,7 @@ using Microsoft.Web.WebView2.Wpf;
 namespace Hearth.Core;
 
 /// <summary>
-/// A tab. Deliberately NOT "a WebView2 with some metadata attached" — the
+/// A tab. Deliberately NOT "a WebView2 with some metadata attached" -- the
 /// identity of a tab is its URL, title and history, all of which survive the
 /// renderer being thrown away. <see cref="View"/> is the disposable part.
 ///
@@ -41,7 +41,7 @@ public sealed class BrowserTab : INotifyPropertyChanged
 
     /// <summary>
     /// Drives LRU eviction ordering in commit 0003. DateTime.MinValue means
-    /// the tab has never been focused — those are the first eviction victims.
+    /// the tab has never been focused -- those are the first eviction victims.
     /// </summary>
     public DateTime LastActivatedUtc { get; internal set; }
 
@@ -116,7 +116,7 @@ public sealed class BrowserTab : INotifyPropertyChanged
     /// The tab's short label in the strip.
     ///
     /// Falls back to the host when no real title is known. That case used to be
-    /// rare — only a background tab opened and never visited — but session
+    /// rare -- only a background tab opened and never visited -- but session
     /// restore made it the common one: every restored tab is cold, so a whole
     /// strip of them would otherwise read "New tab", "New tab", "New tab".
     /// The host is what a person actually recognises a page by.
@@ -129,7 +129,7 @@ public sealed class BrowserTab : INotifyPropertyChanged
                 ? HostLabel
                 : Title;
 
-            return text.Length <= 24 ? text : text[..23] + "…";
+            return text.Length <= 24 ? text : text[..23] + "\u2026";
         }
     }
 
@@ -144,7 +144,7 @@ public sealed class BrowserTab : INotifyPropertyChanged
         internal set => Set(ref _snapshotPath, value);
     }
 
-    /// <summary>Host name only — what a person actually uses to recognise a page.</summary>
+    /// <summary>Host name only -- what a person actually uses to recognise a page.</summary>
     public string HostLabel =>
         Uri.TryCreate(Url, UriKind.Absolute, out var uri)
             ? uri.Host.StartsWith("www.", StringComparison.OrdinalIgnoreCase)
@@ -174,5 +174,5 @@ public sealed class BrowserTab : INotifyPropertyChanged
     private void OnPropertyChanged(string? name) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 
-    public override string ToString() => $"{Id:N}[{State}] {Title} — {Url}";
+    public override string ToString() => $"{Id:N}[{State}] {Title} -- {Url}";
 }

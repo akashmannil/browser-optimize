@@ -43,6 +43,7 @@ Early. Built commit by commit, each with a design note in [`docs/commits/`](docs
 | [`0009`](docs/commits/0009-immersion-mode.md) | Immersion mode, session persistence, mouse gestures |
 | [`0010`](docs/commits/0010-tab-grid.md) | Tab grid fixed — single-click open, mode-aware, zoom transition |
 | [`0011`](docs/commits/0011-address-bar-follows-the-tab.md) | Address bar follows the tab, not keyboard focus |
+| [`0012`](docs/commits/0012-chrome-fixes-and-immersion-edges.md) | Restored missing caption buttons; smoother grid handoff; immersion edge chrome |
 
 ### Two modes
 
@@ -60,6 +61,11 @@ Chromium started with GPU and anti-throttling switches.
 **Immersion costs about 2.5× browse**, and that number belongs next to the feature rather than in a
 footnote. The thesis was never that memory does not matter — it is that you should decide when to
 spend it and be able to see what you spent.
+
+In immersion the chrome comes to whichever edge you reach for: the tab strip and address bar slide
+in at the top, the memory readout at the bottom. Those are **separate top-level windows**, because
+WebView2 paints over all WPF content — an in-window toolbar would be invisible, and reflowing the
+layout to make room would resize the page underneath (`d.airspace-needs-a-second-window`).
 
 **Switching modes restarts Hearth**, which is not a shortcut. `AdditionalBrowserArguments` is read
 once, when the browser process starts, and WebView2 refuses a second environment over the same

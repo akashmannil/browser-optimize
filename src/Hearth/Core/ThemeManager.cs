@@ -11,7 +11,7 @@ public enum AppTheme { System, Light, Dark }
 /// Every brush in the app is referenced with DynamicResource against these
 /// tokens, never a literal colour, so a swap repaints the whole window without
 /// rebuilding any visual tree. The two dictionaries must expose an identical
-/// key set — a key present in one and missing from the other resolves to
+/// key set -- a key present in one and missing from the other resolves to
 /// nothing after a swap and paints transparent.
 /// </summary>
 public static class ThemeManager
@@ -41,7 +41,7 @@ public static class ThemeManager
         Load(dark);
     }
 
-    /// <summary>Cycles System → Light → Dark, which is the order a toggle reads in.</summary>
+    /// <summary>Cycles System -> Light -> Dark, which is the order a toggle reads in.</summary>
     public static AppTheme Cycle()
     {
         var next = _preference switch
@@ -90,7 +90,7 @@ public static class ThemeManager
 
     /// <summary>
     /// Repaints when Windows switches theme, but only while following the
-    /// system — an explicit choice should not be overridden by the OS.
+    /// system -- an explicit choice should not be overridden by the OS.
     /// </summary>
     public static void WatchSystem()
     {

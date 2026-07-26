@@ -13,16 +13,28 @@ namespace Hearth.Views;
 
 public partial class MainWindow : Window
 {
-    private const string HomeUrl = "https://example.com";
+    private const string HomeUrl = "https://www.google.com";
 
-    // Separators and punctuation in this file stay ASCII on purpose. A
-    // PowerShell round-trip over this source once re-encoded every non-ASCII
-    // character (PS 5.1 reads BOM-less UTF-8 as ANSI), and the damage showed up
-    // in the shipped UI as "6 open A. one stays awake". Anything user-visible
-    // that needs real typography is set in XAML, which is read as UTF-8.
-    private const string Dot = "·";   // middle dot
-    private const string Dash = "—";  // em dash
-    private const string Shield = "🛡"; // shield, for the blocked-content pill
+    // EVERY non-ASCII character in this file is a \u escape, and that is a
+    // rule rather than a preference (k.non-ascii-literals-do-not-survive-tooling).
+    //
+    // This source has now lost non-ASCII content twice, by two unrelated
+    // mechanisms. A PowerShell round-trip re-encoded it, because PS 5.1 reads
+    // BOM-less UTF-8 as ANSI. Later a read-then-rewrite dropped the private-use
+    // glyphs entirely, because tools that display source render them as nothing,
+    // so they came back as empty strings. The second one shipped: the maximise
+    // button was an empty string from 0008 until 0012, leaving the window with
+    // no restore control at all.
+    //
+    // Escapes are pure ASCII on disk, so nothing in the chain can lose them, and
+    // they state which code point is meant instead of relying on a glyph render.
+    private const string Dot = "\u00B7";              // middle dot
+    private const string Dash = "\u2014";             // em dash
+    private const string Shield = "\uD83D\uDEE1";      // shield, blocked-content pill
+
+    // Segoe MDL2 Assets - the glyphs Windows own caption buttons use.
+    private const string GlyphMaximise = "\uE922";    // ChromeMaximize
+    private const string GlyphRestore = "\uE923";     // ChromeRestore
 
     private TabManager? _tabs;
     private ShortcutRouter? _router;
@@ -76,11 +88,8 @@ public partial class MainWindow : Window
         _tabs = new TabManager(ContentHost, HearthOptions.FromEnvironment(App.Mode));
         _tabs.Changed += (_, _) => Dispatcher.Invoke(Sync);
         _tabs.Rehydrating += (_, tab) => Dispatcher.Invoke(() => ShowPlaceholder(tab));
-        _tabs.Rehydrated += (_, _) => Dispatcher.InvokeAsync(async () =>
-        {
-            await Task.Delay(220);
-            HidePlaceholder();
-        });
+        _tabs.Rehydrated += (_, tab) => Dispatcher.InvokeAsync(
+            async () => await HoldPlaceholderUntilPaintedAsync(tab));
 
         // Every new renderer gets the keyboard hook. Attaching here rather than
         // once at startup is not an optimisation -- a tab torn down by the
@@ -168,10 +177,13 @@ public partial class MainWindow : Window
     /// </summary>
     private void ApplyMode()
     {
+        // The label says which way the button goes; the tooltip says what it
+        // costs. A mode change that relaunches the process should never be a
+        // surprise, and a bare icon cannot carry that warning.
+        ImmersionLabel.Text = Immersive ? "Exit immersion" : "Immersion";
         ImmersionButton.ToolTip = Immersive
-            ? "Back to browsing  ·  restarts Hearth  ·  F11"
-            : "Immersion  ·  restarts Hearth into fullscreen  ·  F11";
-        ImmersionButton.Content = Immersive ? "" : "";
+            ? $"Leave immersion and restart Hearth  {Dot}  F11"
+            : $"Restart Hearth into fullscreen immersion  {Dot}  F11";
 
         if (!Immersive) return;
 
@@ -190,12 +202,82 @@ public partial class MainWindow : Window
         ResizeMode = ResizeMode.NoResize;
         MaximiseFix.Fullscreen(this);
 
+        BuildEdgeChrome();
+
         // Topmost is what makes the shell yield the taskbar, but a topmost
         // window that stays on top after you alt-tab away is a trap rather than
         // a feature. Yield it while another app is in front, and take it back on
         // return.
         Activated += (_, _) => Topmost = true;
-        Deactivated += (_, _) => Topmost = false;
+        Deactivated += (_, _) =>
+        {
+            Topmost = false;
+            ConcealEdges();
+        };
+    }
+
+    // ------------------------------------------------------------------------
+    // Immersion edge chrome
+    //
+    // The controls are not duplicated for this mode. The real tab strip,
+    // navigation bar and status bar are LIFTED OUT of the main window's layout
+    // and re-hosted in EdgeBar windows, so there is one address bar, one shield,
+    // one memory readout, and no second copy to keep in sync.
+    // ------------------------------------------------------------------------
+
+    private EdgeBar? _topEdge;
+    private EdgeBar? _bottomEdge;
+
+    /// <summary>False while the grid is up, so the edges stay out of its way.</summary>
+    private bool _edgesEnabled = true;
+
+    private void BuildEdgeChrome()
+    {
+        // Detach from the main grid first. These stay Visible: in immersion
+        // their visibility is the EdgeBar's business, not the layout's.
+        Root.Children.Remove(TitleBar);
+        Root.Children.Remove(NavBar);
+        Root.Children.Remove(StatusBar);
+
+        TitleBar.Visibility = Visibility.Visible;
+        NavBar.Visibility = Visibility.Visible;
+        StatusBar.Visibility = Visibility.Visible;
+        NavBar.Margin = new Thickness(10, 0, 10, 8);
+
+        var top = new StackPanel { Background = (Brush)FindResource("Bg") };
+        top.Children.Add(TitleBar);
+        top.Children.Add(NavBar);
+
+        _topEdge = new EdgeBar(this, EdgeBar.Side.Top, top, 96);
+        _bottomEdge = new EdgeBar(this, EdgeBar.Side.Bottom, StatusBar, 34);
+    }
+
+    private void OnEdge(string edge)
+    {
+        if (!Immersive || !_edgesEnabled) return;
+
+        switch (edge)
+        {
+            case "top":
+                _topEdge?.Reveal();
+                _bottomEdge?.Conceal();
+                break;
+
+            case "bottom":
+                _bottomEdge?.Reveal();
+                _topEdge?.Conceal();
+                break;
+
+            default:
+                ConcealEdges();
+                break;
+        }
+    }
+
+    private void ConcealEdges()
+    {
+        _topEdge?.Conceal();
+        _bottomEdge?.Conceal();
     }
 
     /// <summary>
@@ -244,6 +326,10 @@ public partial class MainWindow : Window
             case "tab-prev": Execute(BrowserCommand.PreviousTab, 0); break;
             case "back": Execute(BrowserCommand.Back, 0); break;
             case "forward": Execute(BrowserCommand.Forward, 0); break;
+
+            case "edge-top": OnEdge("top"); break;
+            case "edge-bottom": OnEdge("bottom"); break;
+            case "edge-none": OnEdge("none"); break;
         }
     }
 
@@ -435,9 +521,12 @@ public partial class MainWindow : Window
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
 
     private void UpdateMaximiseGlyph() =>
-        // E923 restore-down, E922 maximise: the same glyphs Windows uses, so the
-        // control keeps meaning what people expect it to mean.
-        MaxButton.Content = WindowState == WindowState.Maximized ? "" : "";
+        // The same glyphs Windows own caption buttons use, so the control keeps
+        // meaning what people expect. Named constants rather than inline literals,
+        // because inline literals are exactly what went missing here.
+        MaxButton.Content = WindowState == WindowState.Maximized
+            ? GlyphRestore
+            : GlyphMaximise;
 
     private void Theme_Click(object sender, RoutedEventArgs e)
     {
@@ -561,8 +650,75 @@ public partial class MainWindow : Window
 
     private void HidePlaceholder()
     {
+        Placeholder.BeginAnimation(OpacityProperty, null);
+        Placeholder.Opacity = 1;
         Placeholder.Visibility = Visibility.Collapsed;
         Placeholder.Source = null;
+        StopLoading();
+    }
+
+    /// <summary>
+    /// Dissolves the placeholder instead of cutting it. The frame underneath is
+    /// the same page at the same scroll offset, so a hard swap reads as a flash
+    /// where a fade reads as the page sharpening into focus.
+    /// </summary>
+    private async Task FadeOutPlaceholderAsync()
+    {
+        if (Placeholder.Visibility != Visibility.Visible) return;
+
+        StopLoading();
+        Placeholder.BeginAnimation(OpacityProperty,
+            new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(200))
+            {
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+            });
+
+        await Task.Delay(210);
+        HidePlaceholder();
+    }
+
+    /// <summary>
+    /// Holds the placeholder until the tab has actually painted, then dissolves
+    /// it.
+    ///
+    /// This replaces a flat 220 ms wait, which commit 0004 recorded as a guess
+    /// rather than a measurement. A guess is wrong in both directions: too short
+    /// for a cold tab doing a real network load, so the placeholder vanished and
+    /// left a blank pane, and needlessly long for a tab that was already warm.
+    /// NavigationCompleted sets HasRendered, which is the real signal.
+    /// </summary>
+    private async Task HoldPlaceholderUntilPaintedAsync(BrowserTab tab)
+    {
+        StartLoading();
+
+        // Cap the wait. A page that never finishes loading must not leave a
+        // screenshot pinned over it forever.
+        for (var waited = 0; waited < 100 && !tab.HasRendered; waited++)
+            await Task.Delay(50);
+
+        // One more beat so the first painted frame is actually up before the
+        // picture covering it goes away.
+        await Task.Delay(90);
+        await FadeOutPlaceholderAsync();
+    }
+
+    private void StartLoading()
+    {
+        LoadingBar.Visibility = Visibility.Visible;
+
+        var travel = Math.Max(ContentArea.ActualWidth, 400);
+        LoadingShift.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(
+            -240, travel, TimeSpan.FromMilliseconds(1100))
+        {
+            RepeatBehavior = RepeatBehavior.Forever,
+            EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut }
+        });
+    }
+
+    private void StopLoading()
+    {
+        LoadingShift.BeginAnimation(TranslateTransform.XProperty, null);
+        LoadingBar.Visibility = Visibility.Collapsed;
     }
 
     // Navigation -------------------------------------------------------------
@@ -657,13 +813,22 @@ public partial class MainWindow : Window
         await _tabs.SetBigPictureAsync(true);
 
         _stateBeforeBigPicture = WindowState;
-        NavBar.Visibility = Visibility.Collapsed;
-        StatusBar.Visibility = Visibility.Collapsed;
 
-        // The tab strip doubles as the title bar, so in browse it stays: losing
-        // it would take the window controls with it. Immersion already has it
-        // collapsed and leaves it that way.
-        if (Immersive) TitleBar.Visibility = Visibility.Collapsed;
+        if (Immersive)
+        {
+            // The chrome is not in this window's layout at all -- it lives in the
+            // EdgeBars. Collapsing it here would empty those instead of hiding
+            // anything, so the grid simply takes the edges off duty.
+            _edgesEnabled = false;
+            ConcealEdges();
+        }
+        else
+        {
+            // The tab strip doubles as the title bar, so in browse it stays:
+            // losing it would take the window controls with it.
+            NavBar.Visibility = Visibility.Collapsed;
+            StatusBar.Visibility = Visibility.Collapsed;
+        }
 
         // WebView2 paints above all WPF content (k.wpf-airspace), so the host
         // has to leave the screen rather than sit behind the overlay.
@@ -689,7 +854,7 @@ public partial class MainWindow : Window
     /// The tab to switch to, if the grid is being left by picking one.
     ///
     /// It is activated HERE, after the shell is restored, and that ordering is
-    /// load-bearing rather than tidy — see <see cref="RestoreShell"/>.
+    /// load-bearing rather than tidy - see <see cref="RestoreShell"/>.
     /// </param>
     private async Task LeaveGridAsync(bool zoomed, BrowserTab? activate = null)
     {
@@ -749,14 +914,18 @@ public partial class MainWindow : Window
         ZoomLayer.Children.Clear();
         ContentHost.Visibility = Visibility.Visible;
 
-        NavBar.Visibility = Visibility.Visible;
-        StatusBar.Visibility = Visibility.Visible;
-
-        // Immersion has no chrome to restore, and restoring the window state
-        // would drop it out of fullscreen.
-        if (!Immersive)
+        if (Immersive)
+        {
+            // Put the edges back on duty, concealed, ready for the next time the
+            // pointer reaches for them. Restoring the window state here would
+            // drop the window out of fullscreen.
+            _edgesEnabled = true;
+        }
+        else
         {
             TitleBar.Visibility = Visibility.Visible;
+            NavBar.Visibility = Visibility.Visible;
+            StatusBar.Visibility = Visibility.Visible;
             WindowState = _stateBeforeBigPicture;
         }
 
@@ -867,7 +1036,17 @@ public partial class MainWindow : Window
             // (k.collapsed-host-blocks-initialisation). LeaveGridAsync restores
             // the shell before it activates, which is the whole ordering.
             await ZoomIntoCardAsync(tab);
+
+            // Hand the zoomed card over to the placeholder BEFORE the shell is
+            // restored, so the picture that just flew up to fill the screen is
+            // still the picture on screen once the grid goes away. Without this
+            // handoff there is a hole between the animation ending and the page
+            // painting, which is precisely what made the transition feel clunky.
+            ShowPlaceholder(tab);
+            await CrossFadeGridOutAsync();
+
             await LeaveGridAsync(zoomed: true, activate: tab);
+            await HoldPlaceholderUntilPaintedAsync(tab);
 
             Diag.Log($"grid: opened {tab.HostLabel}");
         }
@@ -888,7 +1067,12 @@ public partial class MainWindow : Window
     /// </summary>
     private async Task ZoomIntoCardAsync(BrowserTab tab)
     {
-        const int DurationMs = 280;
+        // Slower and eased at both ends. The first version used a 280 ms
+        // QuarticEase EaseIn, which crawls out of the gate and then snaps -- the
+        // motion curve that reads as "clunky" no matter how correct the geometry
+        // underneath it is. A cubic ease-in-out over a slightly longer beat
+        // starts and lands softly, which is what makes it feel continuous.
+        const int DurationMs = 360;
 
         var card = TabWall.ItemContainerGenerator.ContainerFromItem(tab) as ListBoxItem;
         var viewportWidth = BigPicture.ActualWidth;
@@ -931,7 +1115,7 @@ public partial class MainWindow : Window
         // page, and a letterboxed intermediate step would give that away.
         var target = Math.Max(viewportWidth / card.ActualWidth, viewportHeight / card.ActualHeight);
 
-        var ease = new QuarticEase { EasingMode = EasingMode.EaseIn };
+        var ease = new CubicEase { EasingMode = EasingMode.EaseInOut };
         var duration = TimeSpan.FromMilliseconds(DurationMs);
 
         scale.BeginAnimation(ScaleTransform.ScaleXProperty,
@@ -950,18 +1134,31 @@ public partial class MainWindow : Window
 
         await Task.Delay(DurationMs);
 
-        // Fade the ghost out at the very end so the swap to live content is not
-        // a hard cut from a screenshot to a page.
-        ghost.BeginAnimation(OpacityProperty,
-            new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(110)));
-        BigPicture.BeginAnimation(OpacityProperty,
-            new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(110)));
-
-        await Task.Delay(110);
-
+        // Deliberately ends HOLDING the card at full size rather than fading it.
+        // The caller now puts the same page's snapshot into the placeholder
+        // underneath and cross-fades to that, so there is never a frame with
+        // nothing on it. Fading here would reintroduce exactly the gap the
+        // handoff exists to close.
         card.Opacity = 1;
         TabWall.BeginAnimation(OpacityProperty, null);
         TabWall.Opacity = 1;
+    }
+
+    /// <summary>
+    /// Dissolves the grid to reveal whatever is behind it -- by this point, the
+    /// placeholder showing the same page. The ghost and the snapshot are framed
+    /// slightly differently (one is a card, one is the raw capture), so a short
+    /// cross-fade covers the difference where a cut would show it.
+    /// </summary>
+    private async Task CrossFadeGridOutAsync()
+    {
+        BigPicture.BeginAnimation(OpacityProperty,
+            new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(170))
+            {
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+            });
+
+        await Task.Delay(175);
     }
 
     /// <summary>

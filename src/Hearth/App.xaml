@@ -206,6 +206,47 @@
                 </Setter>
             </Style>
 
+            <!-- ── Mode pill ───────────────────────────────────────────────
+                 A labelled button, not an icon. Entering immersion RESTARTS the
+                 browser (k.browser-args-fixed-at-creation), and a bare glyph
+                 cannot warn anyone about that. A word can, and the tooltip says
+                 the rest. -->
+            <Style x:Key="ModePill" TargetType="Button">
+                <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="FontFamily" Value="{StaticResource Body}" />
+                <Setter Property="FontSize" Value="{StaticResource TextSM}" />
+                <Setter Property="Padding" Value="11,5" />
+                <Setter Property="Cursor" Value="Hand" />
+                <Setter Property="WindowChrome.IsHitTestVisibleInChrome" Value="True" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="B"
+                                    CornerRadius="999"
+                                    Padding="{TemplateBinding Padding}"
+                                    Background="{TemplateBinding Background}"
+                                    BorderThickness="1"
+                                    BorderBrush="{DynamicResource Hover}">
+                                <ContentPresenter HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center" />
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="B" Property="Background"
+                                            Value="{DynamicResource Accent}" />
+                                    <Setter TargetName="B" Property="BorderBrush"
+                                            Value="{DynamicResource Accent}" />
+                                    <Setter Property="Foreground"
+                                            Value="{DynamicResource OnAccent}" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
             <!-- ── Tab chip ────────────────────────────────────────────────
                  A ListBoxItem, so selection is the framework's job. The heat pip
                  stays visible at all times: the whole product argument is that

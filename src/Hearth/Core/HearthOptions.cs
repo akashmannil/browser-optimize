@@ -2,7 +2,7 @@ namespace Hearth.Core;
 
 /// <summary>
 /// Tunables for the memory budget. Gathered in one place because these are the
-/// numbers a user is ultimately meant to control — "you set a RAM ceiling and
+/// numbers a user is ultimately meant to control -- "you set a RAM ceiling and
 /// the browser respects it" is the product promise, and it cannot be delivered
 /// by values scattered through the codebase.
 /// </summary>
@@ -32,13 +32,13 @@ public sealed record HearthOptions
     /// This exists because of k.site-isolation-multiplies-renderers: commit 0002
     /// measured 14 renderers for 5 tabs, since site isolation allocates a
     /// renderer per site instance including cross-origin iframes. Rationing tabs
-    /// alone therefore does NOT ration memory — one widget-heavy page can blow
+    /// alone therefore does NOT ration memory -- one widget-heavy page can blow
     /// the ceiling by itself.
     ///
     /// SECURITY TRADE-OFF, made deliberately and documented rather than
     /// defaulted silently: capping the pool forces cross-origin site instances to
-    /// share renderers, which weakens site isolation — the mitigation for
-    /// Spectre-class cross-origin reads — and widens the blast radius of a single
+    /// share renderers, which weakens site isolation -- the mitigation for
+    /// Spectre-class cross-origin reads -- and widens the blast radius of a single
     /// renderer crash. This is the same shape of trade Firefox makes with
     /// dom.ipc.processCount, and it is acceptable HERE because Hearth is an
     /// experiment measuring a memory thesis, not a hardened daily driver.
@@ -46,7 +46,7 @@ public sealed record HearthOptions
     /// Set to null to keep Chromium's default (unbounded) behaviour.
     ///
     /// MEASURED RESULT (0003): this flag DOES NOT WORK for our purpose. It
-    /// reaches the browser process — verified in its command line — and is then
+    /// reaches the browser process -- verified in its command line -- and is then
     /// ignored: with a limit of 8, stackoverflow.com alone still ran 14
     /// renderers. Chromium treats the limit as a soft cap that site isolation is
     /// permitted to exceed, because a site-isolated cross-origin frame MUST get
@@ -100,14 +100,14 @@ public sealed record HearthOptions
     /// Refuse cross-origin subframe documents and media.
     ///
     /// This is the indirect answer to k.no-process-model-control. We cannot cap
-    /// renderers directly — every Chromium switch is ignored — but renderer
+    /// renderers directly -- every Chromium switch is ignored -- but renderer
     /// count is a function of page CONTENT, and content is something an embedder
     /// absolutely can refuse. Cross-origin iframes are what fan a single tab out
     /// into a dozen renderers, so declining them cuts process count without any
     /// process-model API at all: 14 renderers to 1, measured in 0005.
     ///
     /// ON by default since 0008 rather than behind a mode toggle. What changed
-    /// is not the risk — blocking still breaks logins and payment frames — but
+    /// is not the risk -- blocking still breaks logins and payment frames -- but
     /// that <see cref="SiteRules"/> now gives it a per-host escape hatch and the
     /// shell surfaces what was refused. A default that announces itself and can
     /// be overruled in one click is a different proposition from a silent one.

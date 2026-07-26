@@ -42,7 +42,7 @@ public enum BrowserCommand
 
     /// <summary>
     /// Restart into, or out of, immersion mode. This one genuinely relaunches
-    /// the process — see k.browser-args-fixed-at-creation.
+    /// the process -- see k.browser-args-fixed-at-creation.
     /// </summary>
     ToggleImmersion,
 

@@ -93,10 +93,19 @@
             <StackPanel Grid.Column="1" Orientation="Horizontal"
                         VerticalAlignment="Center" Margin="10,0,8,0">
                 <Button x:Name="ImmersionButton"
-                        Style="{StaticResource IconButton}"
-                        Content="&#xE740;" FontSize="13"
-                        ToolTip="Immersion"
-                        Click="Immersion_Click" />
+                        Style="{StaticResource ModePill}"
+                        Margin="0,0,4,0"
+                        Click="Immersion_Click">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE7C4;"
+                                   FontFamily="Segoe MDL2 Assets"
+                                   FontSize="10"
+                                   VerticalAlignment="Center"
+                                   Margin="0,0,7,0" />
+                        <TextBlock x:Name="ImmersionLabel" Text="Immersion"
+                                   VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
                 <Button x:Name="BigPictureButton"
                         Style="{StaticResource IconButton}"
                         Content="&#xE71B;" FontSize="13"
@@ -157,16 +166,41 @@
         </Grid>
 
         <!-- ── Row 2 · web content ─────────────────────────────────────── -->
-        <Grid Grid.Row="2">
+        <Grid Grid.Row="2" x:Name="ContentArea">
             <Grid x:Name="ContentHost" />
+
+            <!-- UniformToFill and top-aligned, so it occupies the pane exactly
+                 the way the page will. It used to be Uniform/DownOnly/centred,
+                 which letterboxed the snapshot and made the swap to live content
+                 a visible jump rather than a dissolve. It is also what the grid
+                 hands its zoomed card off to, so the picture that flew up to
+                 fill the screen is the same picture that is still there while
+                 the page loads behind it. -->
             <Image x:Name="Placeholder"
                    Panel.ZIndex="10"
                    Visibility="Collapsed"
-                   Stretch="Uniform"
-                   StretchDirection="DownOnly"
-                   HorizontalAlignment="Center"
+                   Stretch="UniformToFill"
+                   HorizontalAlignment="Stretch"
                    VerticalAlignment="Top"
                    RenderOptions.BitmapScalingMode="HighQuality" />
+
+            <!-- Indeterminate load indicator. Only ever visible while the
+                 placeholder is up: once the page paints, WebView2 covers all
+                 WPF content anyway (k.wpf-airspace), which happens to be exactly
+                 when there is nothing left to wait for. -->
+            <Border x:Name="LoadingBar"
+                    Height="2" VerticalAlignment="Top"
+                    Panel.ZIndex="20"
+                    Visibility="Collapsed"
+                    ClipToBounds="True"
+                    Background="Transparent">
+                <Rectangle Width="240" HorizontalAlignment="Left"
+                           Fill="{DynamicResource Accent}">
+                    <Rectangle.RenderTransform>
+                        <TranslateTransform x:Name="LoadingShift" X="-240" />
+                    </Rectangle.RenderTransform>
+                </Rectangle>
+            </Border>
         </Grid>
 
         <!-- ── Row 3 · memory ──────────────────────────────────────────── -->

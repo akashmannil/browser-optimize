@@ -8,7 +8,7 @@ namespace Hearth.Views;
 
 /// <summary>
 /// Colours the per-tab heat pip. Making renderer cost continuously visible is a
-/// product requirement, not decoration — users cannot reason about a resource
+/// product requirement, not decoration -- users cannot reason about a resource
 /// they never see (p.invisible-cost).
 ///
 /// Brushes are resolved from the live theme dictionary on every call rather than
