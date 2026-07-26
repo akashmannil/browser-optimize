@@ -28,11 +28,49 @@
             <sys:Double x:Key="TextLG">17</sys:Double>
             <sys:Double x:Key="TextXL">34</sys:Double>
 
-            <Duration x:Key="Fast">0:0:0.16</Duration>
-            <Duration x:Key="Medium">0:0:0.28</Duration>
+            <!-- ── Motion ──────────────────────────────────────────────────
+                 One vocabulary for every moving thing in the app, named for what
+                 it is FOR rather than how long it lasts. Before 0013 there were
+                 two durations and four easings used more or less at random, and
+                 half the controls had no motion at all; the result read as jerky
+                 not because any single animation was wrong but because nothing
+                 agreed with anything else.
 
-            <CubicEase x:Key="EaseOut" EasingMode="EaseOut" />
-            <QuarticEase x:Key="EaseOutStrong" EasingMode="EaseOut" />
+                 PERFORMANCE RULE, and it is the whole reason this is safe to
+                 make longer and more pervasive: only Opacity and Transform are
+                 ever animated. Both are composited per-frame from a retained
+                 visual, so they cost no layout and no re-render. Animating
+                 Width, Height, Margin, Padding or a Color re-runs measure and
+                 arrange on every tick, which is what actually makes WPF stutter
+                 (d.animate-transforms-only). -->
+
+            <!-- Pointer feedback. Must land before the eye settles, or it reads
+                 as lag rather than response. -->
+            <Duration x:Key="MotionQuick">0:0:0.13</Duration>
+
+            <!-- The default. State changes, selection, badges. -->
+            <Duration x:Key="MotionBase">0:0:0.26</Duration>
+
+            <!-- Surfaces arriving and leaving. -->
+            <Duration x:Key="MotionSlow">0:0:0.44</Duration>
+
+            <!-- The one big move: a card becoming a page. -->
+            <Duration x:Key="MotionGrand">0:0:0.58</Duration>
+
+            <!-- Entering: fast at first, settling gently. This is the curve that
+                 makes something feel like it arrived rather than appeared. -->
+            <CubicEase x:Key="EaseEnter" EasingMode="EaseOut" />
+
+            <!-- Leaving: slow to commit, then gone. -->
+            <CubicEase x:Key="EaseExit" EasingMode="EaseIn" />
+
+            <!-- Travelling between two places; symmetric so the middle is the
+                 fastest part, which is how real objects move. -->
+            <CubicEase x:Key="EaseTravel" EasingMode="EaseInOut" />
+
+            <!-- Reserved for the few moments worth emphasising. Sharper
+                 deceleration, so it lands with a little weight. -->
+            <QuinticEase x:Key="EaseEmphasis" EasingMode="EaseOut" />
 
             <views:StateToBrushConverter x:Key="StateToBrush" />
             <views:SnapshotConverter x:Key="Snapshot" />
@@ -53,14 +91,38 @@
                 <Setter Property="Template">
                     <Setter.Value>
                         <ControlTemplate TargetType="Button">
-                            <Border x:Name="B" Background="{TemplateBinding Background}">
+                            <!-- The fill is a separate layer whose OPACITY animates,
+                                 rather than a Background that swaps. Swapping a brush
+                                 is a step change no easing can soften; fading a layer
+                                 is free and continuous. -->
+                            <Grid Background="Transparent">
+                                <Border x:Name="Fill"
+                                        Background="{DynamicResource Hover}" Opacity="0" />
                                 <ContentPresenter HorizontalAlignment="Center"
                                                   VerticalAlignment="Center" />
-                            </Border>
+                            </Grid>
                             <ControlTemplate.Triggers>
                                 <Trigger Property="IsMouseOver" Value="True">
-                                    <Setter TargetName="B" Property="Background"
-                                            Value="{DynamicResource Hover}" />
+                                    <Trigger.EnterActions>
+                                        <BeginStoryboard>
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="Fill"
+                                                                 Storyboard.TargetProperty="Opacity"
+                                                                 To="1" Duration="{StaticResource MotionQuick}"
+                                                                 EasingFunction="{StaticResource EaseEnter}" />
+                                            </Storyboard>
+                                        </BeginStoryboard>
+                                    </Trigger.EnterActions>
+                                    <Trigger.ExitActions>
+                                        <BeginStoryboard>
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="Fill"
+                                                                 Storyboard.TargetProperty="Opacity"
+                                                                 To="0" Duration="{StaticResource MotionBase}"
+                                                                 EasingFunction="{StaticResource EaseExit}" />
+                                            </Storyboard>
+                                        </BeginStoryboard>
+                                    </Trigger.ExitActions>
                                     <Setter Property="Foreground"
                                             Value="{DynamicResource TextPrimary}" />
                                 </Trigger>
@@ -74,14 +136,34 @@
                 <Setter Property="Template">
                     <Setter.Value>
                         <ControlTemplate TargetType="Button">
-                            <Border x:Name="B" Background="Transparent">
+                            <Grid Background="Transparent">
+                                <Border x:Name="Fill"
+                                        Background="{DynamicResource CloseHover}" Opacity="0" />
                                 <ContentPresenter HorizontalAlignment="Center"
                                                   VerticalAlignment="Center" />
-                            </Border>
+                            </Grid>
                             <ControlTemplate.Triggers>
                                 <Trigger Property="IsMouseOver" Value="True">
-                                    <Setter TargetName="B" Property="Background"
-                                            Value="{DynamicResource CloseHover}" />
+                                    <Trigger.EnterActions>
+                                        <BeginStoryboard>
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="Fill"
+                                                                 Storyboard.TargetProperty="Opacity"
+                                                                 To="1" Duration="{StaticResource MotionQuick}"
+                                                                 EasingFunction="{StaticResource EaseEnter}" />
+                                            </Storyboard>
+                                        </BeginStoryboard>
+                                    </Trigger.EnterActions>
+                                    <Trigger.ExitActions>
+                                        <BeginStoryboard>
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="Fill"
+                                                                 Storyboard.TargetProperty="Opacity"
+                                                                 To="0" Duration="{StaticResource MotionBase}"
+                                                                 EasingFunction="{StaticResource EaseExit}" />
+                                            </Storyboard>
+                                        </BeginStoryboard>
+                                    </Trigger.ExitActions>
                                     <Setter Property="Foreground" Value="White" />
                                 </Trigger>
                             </ControlTemplate.Triggers>
@@ -106,14 +188,17 @@
                 <Setter Property="Template">
                     <Setter.Value>
                         <ControlTemplate TargetType="Button">
-                            <Grid Background="Transparent">
+                            <Grid Background="Transparent" RenderTransformOrigin="0.5,0.5">
+                                <Grid.RenderTransform>
+                                    <ScaleTransform x:Name="PressScale" ScaleX="1" ScaleY="1" />
+                                </Grid.RenderTransform>
                                 <Border x:Name="Disc"
                                         Background="{DynamicResource Hover}"
                                         CornerRadius="16"
                                         Opacity="0"
                                         RenderTransformOrigin="0.5,0.5">
                                     <Border.RenderTransform>
-                                        <ScaleTransform x:Name="DiscScale" ScaleX="0.7" ScaleY="0.7" />
+                                        <ScaleTransform x:Name="DiscScale" ScaleX="0.72" ScaleY="0.72" />
                                     </Border.RenderTransform>
                                 </Border>
                                 <ContentPresenter HorizontalAlignment="Center"
@@ -126,16 +211,16 @@
                                             <Storyboard>
                                                 <DoubleAnimation Storyboard.TargetName="Disc"
                                                                  Storyboard.TargetProperty="Opacity"
-                                                                 To="1" Duration="{StaticResource Fast}"
-                                                                 EasingFunction="{StaticResource EaseOut}" />
+                                                                 To="1" Duration="{StaticResource MotionQuick}"
+                                                                 EasingFunction="{StaticResource EaseEnter}" />
                                                 <DoubleAnimation Storyboard.TargetName="DiscScale"
                                                                  Storyboard.TargetProperty="ScaleX"
-                                                                 To="1" Duration="{StaticResource Fast}"
-                                                                 EasingFunction="{StaticResource EaseOut}" />
+                                                                 To="1" Duration="{StaticResource MotionQuick}"
+                                                                 EasingFunction="{StaticResource EaseEnter}" />
                                                 <DoubleAnimation Storyboard.TargetName="DiscScale"
                                                                  Storyboard.TargetProperty="ScaleY"
-                                                                 To="1" Duration="{StaticResource Fast}"
-                                                                 EasingFunction="{StaticResource EaseOut}" />
+                                                                 To="1" Duration="{StaticResource MotionQuick}"
+                                                                 EasingFunction="{StaticResource EaseEnter}" />
                                             </Storyboard>
                                         </BeginStoryboard>
                                     </Trigger.EnterActions>
@@ -144,18 +229,55 @@
                                             <Storyboard>
                                                 <DoubleAnimation Storyboard.TargetName="Disc"
                                                                  Storyboard.TargetProperty="Opacity"
-                                                                 To="0" Duration="{StaticResource Fast}" />
+                                                                 To="0" Duration="{StaticResource MotionQuick}" />
                                                 <DoubleAnimation Storyboard.TargetName="DiscScale"
                                                                  Storyboard.TargetProperty="ScaleX"
-                                                                 To="0.7" Duration="{StaticResource Fast}" />
+                                                                 To="0.72" Duration="{StaticResource MotionBase}"
+                                                                 EasingFunction="{StaticResource EaseExit}" />
                                                 <DoubleAnimation Storyboard.TargetName="DiscScale"
                                                                  Storyboard.TargetProperty="ScaleY"
-                                                                 To="0.7" Duration="{StaticResource Fast}" />
+                                                                 To="0.72" Duration="{StaticResource MotionBase}"
+                                                                 EasingFunction="{StaticResource EaseExit}" />
                                             </Storyboard>
                                         </BeginStoryboard>
                                     </Trigger.ExitActions>
                                     <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
                                 </Trigger>
+
+                                <!-- Press feedback. A control that visibly gives
+                                     under the pointer is the difference between
+                                     "I clicked" and "I think I clicked". -->
+                                <Trigger Property="IsPressed" Value="True">
+                                    <Trigger.EnterActions>
+                                        <BeginStoryboard>
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="PressScale"
+                                                                 Storyboard.TargetProperty="ScaleX"
+                                                                 To="0.88" Duration="0:0:0.07"
+                                                                 EasingFunction="{StaticResource EaseEnter}" />
+                                                <DoubleAnimation Storyboard.TargetName="PressScale"
+                                                                 Storyboard.TargetProperty="ScaleY"
+                                                                 To="0.88" Duration="0:0:0.07"
+                                                                 EasingFunction="{StaticResource EaseEnter}" />
+                                            </Storyboard>
+                                        </BeginStoryboard>
+                                    </Trigger.EnterActions>
+                                    <Trigger.ExitActions>
+                                        <BeginStoryboard>
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="PressScale"
+                                                                 Storyboard.TargetProperty="ScaleX"
+                                                                 To="1" Duration="{StaticResource MotionBase}"
+                                                                 EasingFunction="{StaticResource EaseEmphasis}" />
+                                                <DoubleAnimation Storyboard.TargetName="PressScale"
+                                                                 Storyboard.TargetProperty="ScaleY"
+                                                                 To="1" Duration="{StaticResource MotionBase}"
+                                                                 EasingFunction="{StaticResource EaseEmphasis}" />
+                                            </Storyboard>
+                                        </BeginStoryboard>
+                                    </Trigger.ExitActions>
+                                </Trigger>
+
                                 <Trigger Property="IsEnabled" Value="False">
                                     <Setter Property="Opacity" Value="0.28" />
                                     <Setter Property="Cursor" Value="Arrow" />
@@ -186,17 +308,37 @@
                 <Setter Property="Template">
                     <Setter.Value>
                         <ControlTemplate TargetType="Button">
-                            <Border x:Name="B"
-                                    Background="{TemplateBinding Background}"
-                                    CornerRadius="999"
-                                    Padding="{TemplateBinding Padding}">
-                                <ContentPresenter HorizontalAlignment="Center"
+                            <Grid>
+                                <Border Background="{TemplateBinding Background}"
+                                        CornerRadius="999" />
+                                <Border x:Name="Fill" CornerRadius="999"
+                                        Background="{DynamicResource Accent}" Opacity="0" />
+                                <ContentPresenter Margin="{TemplateBinding Padding}"
+                                                  HorizontalAlignment="Center"
                                                   VerticalAlignment="Center" />
-                            </Border>
+                            </Grid>
                             <ControlTemplate.Triggers>
                                 <Trigger Property="IsMouseOver" Value="True">
-                                    <Setter TargetName="B" Property="Background"
-                                            Value="{DynamicResource Accent}" />
+                                    <Trigger.EnterActions>
+                                        <BeginStoryboard>
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="Fill"
+                                                                 Storyboard.TargetProperty="Opacity"
+                                                                 To="1" Duration="{StaticResource MotionBase}"
+                                                                 EasingFunction="{StaticResource EaseEnter}" />
+                                            </Storyboard>
+                                        </BeginStoryboard>
+                                    </Trigger.EnterActions>
+                                    <Trigger.ExitActions>
+                                        <BeginStoryboard>
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="Fill"
+                                                                 Storyboard.TargetProperty="Opacity"
+                                                                 To="0" Duration="{StaticResource MotionBase}"
+                                                                 EasingFunction="{StaticResource EaseExit}" />
+                                            </Storyboard>
+                                        </BeginStoryboard>
+                                    </Trigger.ExitActions>
                                     <Setter Property="Foreground"
                                             Value="{DynamicResource OnAccent}" />
                                 </Trigger>
@@ -223,23 +365,75 @@
                 <Setter Property="Template">
                     <Setter.Value>
                         <ControlTemplate TargetType="Button">
-                            <Border x:Name="B"
-                                    CornerRadius="999"
-                                    Padding="{TemplateBinding Padding}"
-                                    Background="{TemplateBinding Background}"
-                                    BorderThickness="1"
-                                    BorderBrush="{DynamicResource Hover}">
-                                <ContentPresenter HorizontalAlignment="Center"
+                            <Grid RenderTransformOrigin="0.5,0.5">
+                                <Grid.RenderTransform>
+                                    <ScaleTransform x:Name="PressScale" ScaleX="1" ScaleY="1" />
+                                </Grid.RenderTransform>
+
+                                <Border CornerRadius="999" BorderThickness="1"
+                                        BorderBrush="{DynamicResource Hover}" />
+
+                                <!-- The accent fill is its own layer so it can be
+                                     faded rather than switched. -->
+                                <Border x:Name="Fill" CornerRadius="999"
+                                        Background="{DynamicResource Accent}" Opacity="0" />
+
+                                <ContentPresenter Margin="{TemplateBinding Padding}"
+                                                  HorizontalAlignment="Center"
                                                   VerticalAlignment="Center" />
-                            </Border>
+                            </Grid>
                             <ControlTemplate.Triggers>
                                 <Trigger Property="IsMouseOver" Value="True">
-                                    <Setter TargetName="B" Property="Background"
-                                            Value="{DynamicResource Accent}" />
-                                    <Setter TargetName="B" Property="BorderBrush"
-                                            Value="{DynamicResource Accent}" />
+                                    <Trigger.EnterActions>
+                                        <BeginStoryboard>
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="Fill"
+                                                                 Storyboard.TargetProperty="Opacity"
+                                                                 To="1" Duration="{StaticResource MotionBase}"
+                                                                 EasingFunction="{StaticResource EaseEnter}" />
+                                            </Storyboard>
+                                        </BeginStoryboard>
+                                    </Trigger.EnterActions>
+                                    <Trigger.ExitActions>
+                                        <BeginStoryboard>
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="Fill"
+                                                                 Storyboard.TargetProperty="Opacity"
+                                                                 To="0" Duration="{StaticResource MotionBase}"
+                                                                 EasingFunction="{StaticResource EaseExit}" />
+                                            </Storyboard>
+                                        </BeginStoryboard>
+                                    </Trigger.ExitActions>
                                     <Setter Property="Foreground"
                                             Value="{DynamicResource OnAccent}" />
+                                </Trigger>
+                                <Trigger Property="IsPressed" Value="True">
+                                    <Trigger.EnterActions>
+                                        <BeginStoryboard>
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="PressScale"
+                                                                 Storyboard.TargetProperty="ScaleX"
+                                                                 To="0.95" Duration="0:0:0.07" />
+                                                <DoubleAnimation Storyboard.TargetName="PressScale"
+                                                                 Storyboard.TargetProperty="ScaleY"
+                                                                 To="0.95" Duration="0:0:0.07" />
+                                            </Storyboard>
+                                        </BeginStoryboard>
+                                    </Trigger.EnterActions>
+                                    <Trigger.ExitActions>
+                                        <BeginStoryboard>
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="PressScale"
+                                                                 Storyboard.TargetProperty="ScaleX"
+                                                                 To="1" Duration="{StaticResource MotionBase}"
+                                                                 EasingFunction="{StaticResource EaseEmphasis}" />
+                                                <DoubleAnimation Storyboard.TargetName="PressScale"
+                                                                 Storyboard.TargetProperty="ScaleY"
+                                                                 To="1" Duration="{StaticResource MotionBase}"
+                                                                 EasingFunction="{StaticResource EaseEmphasis}" />
+                                            </Storyboard>
+                                        </BeginStoryboard>
+                                    </Trigger.ExitActions>
                                 </Trigger>
                             </ControlTemplate.Triggers>
                         </ControlTemplate>
@@ -272,7 +466,7 @@
                                             <Storyboard>
                                                 <DoubleAnimation Storyboard.TargetName="Ghost"
                                                                  Storyboard.TargetProperty="Opacity"
-                                                                 To="1" Duration="{StaticResource Fast}" />
+                                                                 To="1" Duration="{StaticResource MotionQuick}" />
                                             </Storyboard>
                                         </BeginStoryboard>
                                     </Trigger.EnterActions>
@@ -281,7 +475,7 @@
                                             <Storyboard>
                                                 <DoubleAnimation Storyboard.TargetName="Ghost"
                                                                  Storyboard.TargetProperty="Opacity"
-                                                                 To="0" Duration="{StaticResource Fast}" />
+                                                                 To="0" Duration="{StaticResource MotionQuick}" />
                                             </Storyboard>
                                         </BeginStoryboard>
                                     </Trigger.ExitActions>
@@ -292,8 +486,8 @@
                                             <Storyboard>
                                                 <DoubleAnimation Storyboard.TargetName="Sel"
                                                                  Storyboard.TargetProperty="Opacity"
-                                                                 To="1" Duration="{StaticResource Fast}"
-                                                                 EasingFunction="{StaticResource EaseOut}" />
+                                                                 To="1" Duration="{StaticResource MotionQuick}"
+                                                                 EasingFunction="{StaticResource EaseEnter}" />
                                             </Storyboard>
                                         </BeginStoryboard>
                                     </Trigger.EnterActions>
@@ -302,7 +496,7 @@
                                             <Storyboard>
                                                 <DoubleAnimation Storyboard.TargetName="Sel"
                                                                  Storyboard.TargetProperty="Opacity"
-                                                                 To="0" Duration="{StaticResource Fast}" />
+                                                                 To="0" Duration="{StaticResource MotionQuick}" />
                                             </Storyboard>
                                         </BeginStoryboard>
                                     </Trigger.ExitActions>
@@ -327,18 +521,44 @@
                 <Setter Property="Template">
                     <Setter.Value>
                         <ControlTemplate TargetType="TextBox">
-                            <Border x:Name="B"
-                                    Background="{TemplateBinding Background}"
-                                    CornerRadius="9"
-                                    Padding="14,8"
-                                    BorderThickness="1.5"
-                                    BorderBrush="Transparent">
-                                <ScrollViewer x:Name="PART_ContentHost" />
-                            </Border>
+                            <Grid>
+                                <Border Background="{TemplateBinding Background}"
+                                        CornerRadius="9" />
+
+                                <!-- The focus ring is a separate border that fades
+                                     in. Animating BorderBrush directly would mean
+                                     animating a Color, which forces a re-render of
+                                     the element every tick; fading a sibling is
+                                     composited (d.animate-transforms-only). -->
+                                <Border x:Name="Ring" CornerRadius="9"
+                                        BorderThickness="1.5"
+                                        BorderBrush="{DynamicResource Accent}"
+                                        Opacity="0" />
+
+                                <ScrollViewer x:Name="PART_ContentHost" Margin="14,8" />
+                            </Grid>
                             <ControlTemplate.Triggers>
                                 <Trigger Property="IsKeyboardFocused" Value="True">
-                                    <Setter TargetName="B" Property="BorderBrush"
-                                            Value="{DynamicResource Accent}" />
+                                    <Trigger.EnterActions>
+                                        <BeginStoryboard>
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="Ring"
+                                                                 Storyboard.TargetProperty="Opacity"
+                                                                 To="1" Duration="{StaticResource MotionBase}"
+                                                                 EasingFunction="{StaticResource EaseEnter}" />
+                                            </Storyboard>
+                                        </BeginStoryboard>
+                                    </Trigger.EnterActions>
+                                    <Trigger.ExitActions>
+                                        <BeginStoryboard>
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="Ring"
+                                                                 Storyboard.TargetProperty="Opacity"
+                                                                 To="0" Duration="{StaticResource MotionBase}"
+                                                                 EasingFunction="{StaticResource EaseExit}" />
+                                            </Storyboard>
+                                        </BeginStoryboard>
+                                    </Trigger.ExitActions>
                                 </Trigger>
                             </ControlTemplate.Triggers>
                         </ControlTemplate>

@@ -246,8 +246,7 @@
               Grid.Row="1" Grid.RowSpan="3"
               Panel.ZIndex="50"
               Visibility="Collapsed"
-              Background="{DynamicResource Scrim}"
-              Opacity="0"
+              Background="Transparent"
               RenderTransformOrigin="0.5,0.5">
             <Grid.RenderTransform>
                 <ScaleTransform x:Name="BigPictureScale" ScaleX="1" ScaleY="1" />
@@ -259,7 +258,16 @@
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <Grid Grid.Row="0" Margin="44,30,44,20">
+            <!-- The scrim is its own leaf so the entrance can fade IT rather than
+                 the whole grid. Animating Opacity on a large subtree forces WPF
+                 to composite that subtree into an offscreen surface every frame;
+                 measured, fading this container cost roughly a third of the
+                 frame rate (~107 fps down to ~69). Opacity is only cheap on
+                 leaves (k.subtree-opacity-is-not-free). -->
+            <Border x:Name="GridScrim" Grid.RowSpan="3"
+                    Background="{DynamicResource Scrim}" Opacity="0" />
+
+            <Grid x:Name="GridHeader" Grid.Row="0" Margin="44,30,44,20" Opacity="0">
                 <StackPanel>
                     <TextBlock Text="Your tabs"
                                Foreground="{DynamicResource TextPrimary}"
@@ -318,17 +326,20 @@
                                             <Grid.RenderTransform>
                                                 <ScaleTransform x:Name="CardScale" ScaleX="1" ScaleY="1" />
                                             </Grid.RenderTransform>
+                                            <!-- No DropShadowEffect. A blur is
+                                                 recomputed every frame for every
+                                                 card, and with a dozen cards
+                                                 scaling and fading at once it was
+                                                 the heaviest thing in the app.
+                                                 Elevation now comes from a
+                                                 hairline plus background
+                                                 contrast, which costs nothing per
+                                                 frame (k.effects-are-per-frame). -->
                                             <Border x:Name="Card"
                                                     CornerRadius="16"
                                                     Background="{DynamicResource CardBg}"
-                                                    BorderBrush="Transparent"
-                                                    BorderThickness="2.5">
-                                                <Border.Effect>
-                                                    <DropShadowEffect x:Name="Shade"
-                                                                      BlurRadius="26" ShadowDepth="7"
-                                                                      Direction="270" Opacity="0.22"
-                                                                      Color="#000000" />
-                                                </Border.Effect>
+                                                    BorderBrush="{DynamicResource Hover}"
+                                                    BorderThickness="1">
                                                 <ContentPresenter />
                                             </Border>
                                         </Grid>
@@ -342,12 +353,12 @@
                                                         <Storyboard>
                                                             <DoubleAnimation Storyboard.TargetName="CardScale"
                                                                              Storyboard.TargetProperty="ScaleX"
-                                                                             To="1.035" Duration="{StaticResource Medium}"
-                                                                             EasingFunction="{StaticResource EaseOutStrong}" />
+                                                                             To="1.035" Duration="{StaticResource MotionBase}"
+                                                                             EasingFunction="{StaticResource EaseEmphasis}" />
                                                             <DoubleAnimation Storyboard.TargetName="CardScale"
                                                                              Storyboard.TargetProperty="ScaleY"
-                                                                             To="1.035" Duration="{StaticResource Medium}"
-                                                                             EasingFunction="{StaticResource EaseOutStrong}" />
+                                                                             To="1.035" Duration="{StaticResource MotionBase}"
+                                                                             EasingFunction="{StaticResource EaseEmphasis}" />
                                                         </Storyboard>
                                                     </BeginStoryboard>
                                                 </Trigger.EnterActions>
@@ -356,17 +367,19 @@
                                                         <Storyboard>
                                                             <DoubleAnimation Storyboard.TargetName="CardScale"
                                                                              Storyboard.TargetProperty="ScaleX"
-                                                                             To="1" Duration="{StaticResource Medium}"
-                                                                             EasingFunction="{StaticResource EaseOut}" />
+                                                                             To="1" Duration="{StaticResource MotionBase}"
+                                                                             EasingFunction="{StaticResource EaseEnter}" />
                                                             <DoubleAnimation Storyboard.TargetName="CardScale"
                                                                              Storyboard.TargetProperty="ScaleY"
-                                                                             To="1" Duration="{StaticResource Medium}"
-                                                                             EasingFunction="{StaticResource EaseOut}" />
+                                                                             To="1" Duration="{StaticResource MotionBase}"
+                                                                             EasingFunction="{StaticResource EaseEnter}" />
                                                         </Storyboard>
                                                     </BeginStoryboard>
                                                 </Trigger.ExitActions>
                                             </Trigger>
                                             <Trigger Property="IsSelected" Value="True">
+                                                <Setter TargetName="Card" Property="BorderThickness"
+                                                        Value="2.5" />
                                                 <Setter TargetName="Card" Property="BorderBrush"
                                                         Value="{DynamicResource Accent}" />
                                             </Trigger>
@@ -421,7 +434,7 @@
                     </ListBox.ItemTemplate>
             </ListBox>
 
-            <TextBlock Grid.Row="2" Margin="44,16,44,26"
+            <TextBlock x:Name="GridFooter" Grid.Row="2" Margin="44,16,44,26" Opacity="0"
                        Foreground="{DynamicResource TextTertiary}"
                        FontFamily="{StaticResource Body}"
                        FontSize="{StaticResource TextSM}"

@@ -314,7 +314,7 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 
 <!-- GENERATED: node index below is rebuilt from knowledge-graph.json. -->
 
-**90 nodes, 204 edges**, current to commit `0012`. This table is generated from the JSON; edit the JSON, never this table.
+**99 nodes, 224 edges**, current to commit `0013`. This table is generated from the JSON; edit the JSON, never this table.
 
 ### Problems (4)
 
@@ -335,7 +335,7 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 | `c.ram-for-disk-trade` | Disk cost is effectively free at any realistic tab count. 1,000 hibernated tabs would occupy roughly 27 MB. There is no reason to ration snapshots or... |
 | `c.hibernate-by-default` **[core thesis]** | Every other browser treats loaded as default and unloading as an emergency. Chrome Memory Saver and Firefox tab unloading are REACTIVE, triggering... |
 
-### Decisions (21)
+### Decisions (22)
 
 | id | one-line |
 | --- | --- |
@@ -360,8 +360,9 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 | `d.address-bar-follows-the-tab` | Guarding on focus alone was wrong because focus SURVIVES a tab switch: Ctrl+T focuses the bar, and every switch after that (Ctrl+Tab, Ctrl+1... |
 | `d.airspace-needs-a-second-window` | k.wpf-airspace makes an in-window overlay invisible the moment a page paints. 0006 solved that for the tab grid by collapsing the content host, which... |
 | `d.snapshot-handoff-covers-the-load` | k.collapsed-host-blocks-initialisation forces the order 'animate, then activate', so the zoom finished and the page load began with nothing on screen... |
+| `d.one-motion-vocabulary` | Before 0013 there were two durations and four easings applied more or less at random, and half the controls had no motion at all. The app read as... |
 
-### Constraints (immovable) (20)
+### Constraints (immovable) (24)
 
 | id | one-line |
 | --- | --- |
@@ -385,6 +386,10 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 | `k.mouse-input-never-reaches-wpf` | Pointer gestures can only be recognised inside the page, by an injected listener posting through window.chrome.webview. |
 | `k.collapsed-host-blocks-initialisation` | MainWindow.RestoreShell runs, including a forced UpdateLayout, before any activation triggered from the grid. |
 | `k.non-ascii-literals-do-not-survive-tooling` | Every hand-written C# file under src/Hearth contains zero bytes above 0x7F. Checkable in one line: sum(1 for b in open(path,"rb").read() if b > 127)... |
+| `k.subtree-opacity-is-not-free` | No animation targets Opacity on a container that has more than a couple of overlapping children. |
+| `k.effects-are-per-frame` | Elevation is expressed with a hairline border and background contrast instead. Effects are acceptable only on things that do not animate and do not... |
+| `k.cached-bitmap-loses-to-visualbrush` | The obvious 'rasterise once' optimisation is wrong for anything that scales up substantially. Reverted; the VisualBrush is the shipped path. |
+| `k.begintime-null-never-runs` | BeginTime is a TimeSpan? whose default is TimeSpan.Zero. Assigning null does not mean 'no delay', it means the timeline never begins. No error is... |
 
 ### WebView2 APIs (4)
 
@@ -395,7 +400,7 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 | `api.capturepreview` | Captures the visible content of a WebView2 to a PNG or JPEG stream. Used to produce the visual placeholder that makes an evicted tab... |
 | `api.memory-target-level` | Hints to the runtime that a WebView2 should minimise memory usage. Cheaper and lower-fidelity than TrySuspend; usable as an intermediate tier for... |
 
-### Metrics (5)
+### Metrics (6)
 
 | id | one-line |
 | --- | --- |
@@ -404,8 +409,9 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 | `m.reclaim-delta` | Working-set bytes returned to the OS by evicting one tab. Doubles as the per-tab cost estimate that makes the invisible cost legible to users. |
 | `m.filtering-reclaim` | One tab on stackoverflow.com, one Debug build, 90 s settle, only HEARTH_BLOCK_FRAMES varying. Filtering on: 1 renderer / 719 MB. Filtering off... |
 | `m.immersion-cost` | Six real sites, every tab activated so the budget binds, one Debug build, 95 s settle. Browse: 3 renderers / 890 MB. Immersion: 20 renderers / 2197... |
+| `m.animation-smoothness` | Tab grid entrance after 0013: 0.7 long frames (>25 ms) per 450 ms entrance across six runs, worst gap 17-78 ms, typically 70-120 fps. The animations... |
 
-### Components (19)
+### Components (21)
 
 | id | one-line |
 | --- | --- |
@@ -428,8 +434,10 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 | `cmp.sessionstore` | Exists to make d.mode-switch-restarts affordable. A browser that loses your tabs when you change a setting is one nobody changes the setting on. |
 | `cmp.gesturescript` | The only place a pointer gesture can be recognised, per k.mouse-input-never-reaches-wpf. |
 | `cmp.edgebar` | Never activates and never resizes the owner. Both would undo the fullscreen state the mode depends on. |
+| `cmp.motion` | Only ever targets Opacity or a Transform. |
+| `cmp.framemeter` | Smoothness was the one quality claim in the project that had never been measured. Long-frame count is the headline: mean frame rate saturates at the... |
 
-### Commits (12)
+### Commits (13)
 
 | id | one-line |
 | --- | --- |
@@ -445,3 +453,4 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 | `commit.0010` | Found and fixed the reason picking a tab from the grid hung: activation was started while the content host was still collapsed. Grid no longer... |
 | `commit.0011` | The address bar no longer keeps showing the previous tab's URL after a switch made while it had keyboard focus. |
 | `commit.0012` | Restored the maximise and immersion buttons, which had been empty strings since 0008, and made every non-ASCII source literal an escape. Labelled the... |
+| `commit.0013` | A shared motion vocabulary applied app-wide, with previously static controls animated and press feedback added. Introduced frame instrumentation... |

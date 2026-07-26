@@ -20,7 +20,12 @@ namespace Hearth.Core;
 public static class Diag
 {
     private static readonly object Gate = new();
-    private static readonly bool Enabled =
+
+    /// <summary>
+    /// Whether tracing is on. Exposed so callers can skip building instruments
+    /// that would cost something even with nothing to write them to.
+    /// </summary>
+    public static readonly bool Enabled =
         Environment.GetEnvironmentVariable("HEARTH_TRACE") is "1" or "true";
 
     private static readonly Lazy<string> Path = new(() =>

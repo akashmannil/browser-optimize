@@ -86,7 +86,10 @@ public sealed class EdgeBar : Window
         SyncBounds();
         if (!IsVisible) Show();
 
-        Animate(to: 0, opacity: 1, milliseconds: 220);
+        // Emphasis on the way in: the bar is answering a deliberate reach for
+        // the edge, and a decelerating curve makes it feel caught rather than
+        // dropped.
+        Animate(to: 0, opacity: 1, duration: Motion.Slow, easing: Motion.Emphasis);
     }
 
     public void Conceal()
@@ -94,7 +97,8 @@ public sealed class EdgeBar : Window
         if (!_revealed) return;
         _revealed = false;
 
-        Animate(to: _side == Side.Top ? -Height : Height, opacity: 0, milliseconds: 170);
+        Animate(to: _side == Side.Top ? -Height : Height,
+                opacity: 0, duration: Motion.Base, easing: Motion.Exit);
     }
 
     /// <summary>
@@ -102,18 +106,17 @@ public sealed class EdgeBar : Window
     /// make Windows redraw the region underneath on every frame, and the region
     /// underneath is a live page.
     /// </summary>
-    private void Animate(double to, double opacity, int milliseconds)
+    private void Animate(double to, double opacity, Duration duration, IEasingFunction easing)
     {
-        var duration = TimeSpan.FromMilliseconds(milliseconds);
-        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
-
         if (_revealed) _slide.Y = _side == Side.Top ? -Height : Height;
 
         _slide.BeginAnimation(TranslateTransform.YProperty,
-            new DoubleAnimation(to, duration) { EasingFunction = ease });
+            Motion.To(to, duration, easing));
 
+        // Opacity leads the slide slightly, so the bar is already legible by the
+        // time it stops moving.
         _panel.BeginAnimation(OpacityProperty,
-            new DoubleAnimation(opacity, duration) { EasingFunction = ease });
+            Motion.To(opacity, Motion.Base, easing));
     }
 
     /// <summary>

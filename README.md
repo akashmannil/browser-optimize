@@ -44,6 +44,7 @@ Early. Built commit by commit, each with a design note in [`docs/commits/`](docs
 | [`0010`](docs/commits/0010-tab-grid.md) | Tab grid fixed — single-click open, mode-aware, zoom transition |
 | [`0011`](docs/commits/0011-address-bar-follows-the-tab.md) | Address bar follows the tab, not keyboard focus |
 | [`0012`](docs/commits/0012-chrome-fixes-and-immersion-edges.md) | Restored missing caption buttons; smoother grid handoff; immersion edge chrome |
+| [`0013`](docs/commits/0013-motion-rework.md) | App-wide motion system, measured — and three optimisations it disproved |
 
 ### Two modes
 

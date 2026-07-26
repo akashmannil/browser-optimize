@@ -528,10 +528,45 @@ public partial class MainWindow : Window
             ? GlyphRestore
             : GlyphMaximise;
 
-    private void Theme_Click(object sender, RoutedEventArgs e)
+    private bool _themeSwitching;
+
+    /// <summary>
+    /// Cross-fades the chrome through the theme swap. Replacing the token
+    /// dictionary repaints every brush in one frame, which is a hard flash on a
+    /// window this dark or this light.
+    ///
+    /// Only the CHROME is faded, never the whole window. The page cannot fade
+    /// with it -- WebView2 is a child HWND and ignores WPF opacity entirely
+    /// (k.wpf-airspace) -- so dipping the window would produce a broken-looking
+    /// transition where the frame dissolves and the content sits there. Fading
+    /// only what actually changes colour is also the honest description of what
+    /// a theme switch does: the page is not themed by us.
+    /// </summary>
+    private async void Theme_Click(object sender, RoutedEventArgs e)
     {
-        var next = ThemeManager.Cycle();
-        ThemeButton.ToolTip = $"Theme: {next}";
+        if (_themeSwitching) return;
+        _themeSwitching = true;
+
+        try
+        {
+            var chrome = new UIElement[] { TitleBar, NavBar, StatusBar };
+
+            await Task.WhenAll(chrome.Select(
+                c => Motion.FadeAsync(c, 0, Motion.Quick, Motion.Exit)));
+
+            var next = ThemeManager.Cycle();
+            ThemeButton.ToolTip = $"Theme: {next}";
+
+            // Let the new brushes be picked up before anything is visible again.
+            UpdateLayout();
+
+            await Task.WhenAll(chrome.Select(
+                c => Motion.FadeAsync(c, 1, Motion.Base, Motion.Enter)));
+        }
+        finally
+        {
+            _themeSwitching = false;
+        }
     }
 
     // Sync -------------------------------------------------------------------
@@ -667,13 +702,7 @@ public partial class MainWindow : Window
         if (Placeholder.Visibility != Visibility.Visible) return;
 
         StopLoading();
-        Placeholder.BeginAnimation(OpacityProperty,
-            new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(200))
-            {
-                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
-            });
-
-        await Task.Delay(210);
+        await Motion.FadeAsync(Placeholder, 0, Motion.Slow, Motion.Enter);
         HidePlaceholder();
     }
 
@@ -847,6 +876,13 @@ public partial class MainWindow : Window
         AnimateBigPicture(fadeIn: true);
         StaggerCardsIn();
 
+        if (FrameMeter.Start("grid-enter") is { } meter)
+            _ = Dispatcher.InvokeAsync(async () =>
+            {
+                await Task.Delay(Motion.Slow.TimeSpan);
+                meter.Dispose();
+            });
+
         Sync();
     }
 
@@ -941,21 +977,38 @@ public partial class MainWindow : Window
     /// full size reads as the surface arriving; a plain fade reads as a dialog
     /// appearing.
     /// </summary>
+    /// <summary>
+    /// Brings the grid in or out.
+    ///
+    /// Fades the SCRIM, HEADER and FOOTER individually rather than the whole
+    /// container. Opacity on a large subtree is not free -- WPF has to composite
+    /// that subtree into an offscreen surface every frame -- and fading this
+    /// container measured about a third of the frame rate away
+    /// (k.subtree-opacity-is-not-free). The cards are not included here either;
+    /// they carry their own staggered entrance.
+    /// </summary>
     private void AnimateBigPicture(bool fadeIn)
     {
-        var ease = new QuarticEase { EasingMode = EasingMode.EaseOut };
-        var duration = TimeSpan.FromMilliseconds(300);
+        var duration = Motion.Slow;
+        var easing = fadeIn ? Motion.Emphasis : Motion.Exit;
+        var target = fadeIn ? 1 : 0;
 
-        BigPictureScale.ScaleX = BigPictureScale.ScaleY = fadeIn ? 0.965 : 1;
+        // The container itself is always fully opaque; only its parts fade.
+        BigPicture.Opacity = 1;
 
-        BigPicture.BeginAnimation(OpacityProperty,
-            new DoubleAnimation(fadeIn ? 0 : 1, fadeIn ? 1 : 0, duration) { EasingFunction = ease });
+        foreach (var part in new UIElement[] { GridScrim, GridHeader, GridFooter })
+            part.BeginAnimation(OpacityProperty, Motion.To(target, duration, easing));
 
-        var to = fadeIn ? 1 : 0.965;
+        // Scaling from 0.94 rather than 0.965: a bigger travel over a longer
+        // beat reads as a surface moving toward you. Transforms need no
+        // offscreen surface, so this one is genuinely cheap.
+        BigPictureScale.ScaleX = BigPictureScale.ScaleY = fadeIn ? 0.94 : 1;
+
+        var scaleTo = fadeIn ? 1 : 0.94;
         BigPictureScale.BeginAnimation(ScaleTransform.ScaleXProperty,
-            new DoubleAnimation(to, duration) { EasingFunction = ease });
+            Motion.To(scaleTo, duration, easing));
         BigPictureScale.BeginAnimation(ScaleTransform.ScaleYProperty,
-            new DoubleAnimation(to, duration) { EasingFunction = ease });
+            Motion.To(scaleTo, duration, easing));
     }
 
     /// <summary>
@@ -968,24 +1021,34 @@ public partial class MainWindow : Window
     {
         TabWall.UpdateLayout();
 
-        var ease = new QuarticEase { EasingMode = EasingMode.EaseOut };
-
         for (var i = 0; i < TabWall.Items.Count; i++)
         {
             if (TabWall.ItemContainerGenerator.ContainerFromIndex(i) is not ListBoxItem card)
                 continue;   // Virtualised away, i.e. off-screen. Nothing to stagger.
 
-            var lift = new TranslateTransform(0, 16);
-            card.RenderTransform = lift;
+            // Rise AND scale, rather than rise alone. Two properties moving
+            // together read as one object arriving; a lone translate reads as a
+            // list scrolling.
+            var lift = new TranslateTransform(0, 22);
+            var grow = new ScaleTransform(0.96, 0.96);
+            var group = new TransformGroup();
+            group.Children.Add(grow);
+            group.Children.Add(lift);
+
+            card.RenderTransformOrigin = new Point(0.5, 0.5);
+            card.RenderTransform = group;
             card.Opacity = 0;
 
-            var begin = TimeSpan.FromMilliseconds(Math.Min(i, 12) * 26);
+            var begin = TimeSpan.FromMilliseconds(Math.Min(i, 12) * 34);
 
-            card.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1,
-                TimeSpan.FromMilliseconds(240)) { BeginTime = begin, EasingFunction = ease });
-
-            lift.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(16, 0,
-                TimeSpan.FromMilliseconds(320)) { BeginTime = begin, EasingFunction = ease });
+            card.BeginAnimation(OpacityProperty,
+                Motion.From(0, 1, Motion.Base, Motion.Enter, begin));
+            lift.BeginAnimation(TranslateTransform.YProperty,
+                Motion.From(22, 0, Motion.Slow, Motion.Emphasis, begin));
+            grow.BeginAnimation(ScaleTransform.ScaleXProperty,
+                Motion.From(0.96, 1, Motion.Slow, Motion.Emphasis, begin));
+            grow.BeginAnimation(ScaleTransform.ScaleYProperty,
+                Motion.From(0.96, 1, Motion.Slow, Motion.Emphasis, begin));
         }
     }
 
@@ -1067,12 +1130,10 @@ public partial class MainWindow : Window
     /// </summary>
     private async Task ZoomIntoCardAsync(BrowserTab tab)
     {
-        // Slower and eased at both ends. The first version used a 280 ms
-        // QuarticEase EaseIn, which crawls out of the gate and then snaps -- the
-        // motion curve that reads as "clunky" no matter how correct the geometry
-        // underneath it is. A cubic ease-in-out over a slightly longer beat
-        // starts and lands softly, which is what makes it feel continuous.
-        const int DurationMs = 360;
+        // The one deliberately large movement in the app, so it gets the longest
+        // duration and a symmetric curve: fastest in the middle, soft at both
+        // ends, the way a real object travels.
+        var duration = Motion.Grand;
 
         var card = TabWall.ItemContainerGenerator.ContainerFromItem(tab) as ListBoxItem;
         var viewportWidth = BigPicture.ActualWidth;
@@ -1083,12 +1144,28 @@ public partial class MainWindow : Window
         if (card is null || card.ActualWidth <= 0 || viewportWidth <= 0)
         {
             AnimateBigPicture(fadeIn: false);
-            await Task.Delay(200);
+            await Task.Delay(Motion.Slow.TimeSpan);
             return;
         }
 
         var origin = card.TransformToVisual(BigPicture).Transform(new Point(0, 0));
 
+        // A LIVE VisualBrush, not a cached bitmap, and that is a measured choice
+        // rather than the obvious one (k.cached-bitmap-loses-to-visualbrush).
+        //
+        // Caching the card into a frozen RenderTargetBitmap and flying that looks
+        // like the clear optimisation -- rasterise once instead of re-rendering
+        // per frame -- so 0013 built it. Measured on one build with only this
+        // varying, it cost THREE TIMES the CPU: 47 ms across the animation
+        // against 16 ms for the VisualBrush.
+        //
+        // The rasterisation is not the expense; it finishes before the
+        // measurement window opens. The expense is resampling. This card is
+        // 308px wide and grows to fill the viewport, so a bitmap gets upscaled
+        // roughly four times on every frame. The VisualBrush instead re-renders
+        // the card's vectors and text AT the size being drawn, which is both
+        // cheaper and sharper -- an upscaled bitmap goes soft exactly when the
+        // card is largest and most looked at.
         var ghost = new System.Windows.Shapes.Rectangle
         {
             Width = card.ActualWidth,
@@ -1115,24 +1192,24 @@ public partial class MainWindow : Window
         // page, and a letterboxed intermediate step would give that away.
         var target = Math.Max(viewportWidth / card.ActualWidth, viewportHeight / card.ActualHeight);
 
-        var ease = new CubicEase { EasingMode = EasingMode.EaseInOut };
-        var duration = TimeSpan.FromMilliseconds(DurationMs);
-
         scale.BeginAnimation(ScaleTransform.ScaleXProperty,
-            new DoubleAnimation(target, duration) { EasingFunction = ease });
+            Motion.To(target, duration, Motion.Travel));
         scale.BeginAnimation(ScaleTransform.ScaleYProperty,
-            new DoubleAnimation(target, duration) { EasingFunction = ease });
+            Motion.To(target, duration, Motion.Travel));
 
-        slide.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(
-            viewportWidth / 2 - (origin.X + card.ActualWidth / 2), duration) { EasingFunction = ease });
-        slide.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(
-            viewportHeight / 2 - (origin.Y + card.ActualHeight / 2), duration) { EasingFunction = ease });
+        slide.BeginAnimation(TranslateTransform.XProperty, Motion.To(
+            viewportWidth / 2 - (origin.X + card.ActualWidth / 2), duration, Motion.Travel));
+        slide.BeginAnimation(TranslateTransform.YProperty, Motion.To(
+            viewportHeight / 2 - (origin.Y + card.ActualHeight / 2), duration, Motion.Travel));
 
         // The rest of the wall drops away underneath the card that is growing.
-        TabWall.BeginAnimation(OpacityProperty,
-            new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(180)) { EasingFunction = ease });
+        // Faster than the zoom, so the chosen card is unambiguous early.
+        TabWall.BeginAnimation(OpacityProperty, Motion.From(1, 0, Motion.Base, Motion.Exit));
 
-        await Task.Delay(DurationMs);
+        using (FrameMeter.Start("zoom"))
+        {
+            await Task.Delay(duration.TimeSpan);
+        }
 
         // Deliberately ends HOLDING the card at full size rather than fading it.
         // The caller now puts the same page's snapshot into the placeholder
@@ -1150,16 +1227,18 @@ public partial class MainWindow : Window
     /// slightly differently (one is a card, one is the raw capture), so a short
     /// cross-fade covers the difference where a cut would show it.
     /// </summary>
-    private async Task CrossFadeGridOutAsync()
-    {
-        BigPicture.BeginAnimation(OpacityProperty,
-            new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(170))
-            {
-                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
-            });
-
-        await Task.Delay(175);
-    }
+    /// <summary>
+    /// Dissolves what is left of the grid to reveal the placeholder behind it.
+    /// The cards are already gone by this point -- the zoom faded the wall out
+    /// and flew the chosen one -- so this only has the scrim and the two labels
+    /// to deal with, and fades them as leaves rather than fading the container
+    /// (k.subtree-opacity-is-not-free).
+    /// </summary>
+    private Task CrossFadeGridOutAsync() =>
+        Task.WhenAll(
+            Motion.FadeAsync(GridScrim, 0, Motion.Base, Motion.Enter),
+            Motion.FadeAsync(GridHeader, 0, Motion.Base, Motion.Enter),
+            Motion.FadeAsync(GridFooter, 0, Motion.Base, Motion.Enter));
 
     /// <summary>
     /// The chrome-focus half of the keyboard story. This fires only while focus

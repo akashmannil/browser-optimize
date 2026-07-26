@@ -2,7 +2,7 @@
   "project": "hearth",
   "description": "A low-resource Windows browser shell built on WebView2, whose core bet is that hibernated is a tab's default state and live is a budgeted exception.",
   "schema_version": "1.0",
-  "graph_updated_at_commit": "0012",
+  "graph_updated_at_commit": "0013",
   "consumer_notes": "This file is the authoritative machine-readable model of WHY this codebase is shaped the way it is. Source code records what the system does; this graph records the reasoning, the rejected alternatives, and the constraints that must not be violated. Agents should read this before proposing architectural changes. Every node has a stable `id` that is safe to reference in commits, issues, and other documents. When you add a feature, add its nodes/edges here in the same commit.",
   "node_types": {
     "problem": "An observed user-facing or system-level problem the project exists to solve.",
@@ -822,6 +822,85 @@
       "label": "0012 - chrome fixes and immersion edges",
       "summary": "Restored the maximise and immersion buttons, which had been empty strings since 0008, and made every non-ASCII source literal an escape. Labelled the immersion button so it names the restart. Default landing page moved to Google. Grid open transition made continuous via a snapshot handoff and a paint-driven placeholder. Immersion gained pointer-proximity chrome at the top and bottom edges, hosted in separate windows because airspace forbids overlays.",
       "doc": "docs/commits/0012-chrome-fixes-and-immersion-edges.md"
+    },
+    {
+      "id": "d.one-motion-vocabulary",
+      "type": "decision",
+      "label": "Four durations and four easings, named for purpose, used everywhere",
+      "summary": "MotionQuick/Base/Slow/Grand and EaseEnter/Exit/Travel/Emphasis are declared once in App.xaml and mirrored in Motion.cs for code. Every animated control resolves through them.",
+      "rationale": "Before 0013 there were two durations and four easings applied more or less at random, and half the controls had no motion at all. The app read as jerky not because any single animation was wrong but because nothing agreed with anything else. Naming by purpose rather than by milliseconds is what stops the set growing again.",
+      "why_duplicated_in_code": "Motion.cs restates the values rather than resolving them from the resource dictionary. A mistyped resource key fails silently and leaves an animation that never plays; a mistyped field does not compile.",
+      "revisit_if": "A reduced-motion preference is added, at which point every duration needs to collapse to zero from one place."
+    },
+    {
+      "id": "k.subtree-opacity-is-not-free",
+      "type": "constraint",
+      "label": "Animating Opacity on a large subtree forces offscreen composition every frame",
+      "summary": "Opacity below 1 on a container with overlapping children makes WPF render that subtree into an intermediate surface each frame. Only Transform, and Opacity on leaf elements, are genuinely cheap.",
+      "discovered_in": "0013",
+      "measured": "Fading the whole tab grid versus fading its scrim, header and footer as separate leaves: long frames per 450 ms entrance fell from 1.0 to 0.7 and the rate rose from about 69 to about 79 fps.",
+      "implication": "Corrects the rule written earlier in the same commit, which claimed Opacity and Transform were equally free. Compose entrances out of leaf fades plus a container transform.",
+      "invariant": "No animation targets Opacity on a container that has more than a couple of overlapping children."
+    },
+    {
+      "id": "k.effects-are-per-frame",
+      "type": "constraint",
+      "label": "A WPF Effect is recomputed every frame it is visible",
+      "summary": "DropShadowEffect and friends are not cached. A blurred card re-blurs on every frame of any animation touching it, and the cost multiplies by the number of such elements on screen.",
+      "discovered_in": "0013",
+      "measured": "Tab grid entrance, same build, only the effect varying, cold sample discarded: with DropShadowEffect 56/60/62/54/59 fps (mean 58); without 103/115/94/112/115 fps (mean 108). Non-overlapping ranges.",
+      "implication": "Elevation is expressed with a hairline border and background contrast instead. Effects are acceptable only on things that do not animate and do not appear in quantity."
+    },
+    {
+      "id": "k.cached-bitmap-loses-to-visualbrush",
+      "type": "constraint",
+      "label": "Caching a visual to a bitmap before scaling it costs MORE than re-rendering it",
+      "summary": "Flying a frozen RenderTargetBitmap of the tab card, rather than a live VisualBrush, cost three times the CPU: 47 ms against 16 ms across the zoom, same build, only the implementation varying.",
+      "discovered_in": "0013",
+      "why": "The rasterisation is not the expense -- it completes before the animation starts. The expense is resampling: a 308px card grown to fill the viewport is a roughly fourfold upscale on every frame. A VisualBrush re-renders vectors and text AT the drawn size, which is cheaper AND sharper; the bitmap goes soft exactly when the card is largest.",
+      "implication": "The obvious 'rasterise once' optimisation is wrong for anything that scales up substantially. Reverted; the VisualBrush is the shipped path.",
+      "lesson": "This was implemented, justified in a comment, and committed to before being measured. The measurement reversed it."
+    },
+    {
+      "id": "k.begintime-null-never-runs",
+      "type": "constraint",
+      "label": "Setting Timeline.BeginTime to null disables the animation silently",
+      "summary": "BeginTime is a TimeSpan? whose default is TimeSpan.Zero. Assigning null does not mean 'no delay', it means the timeline never begins. No error is raised and the animated property simply keeps its declared value.",
+      "discovered_in": "0013",
+      "how_it_showed": "A helper passed an optional TimeSpan? straight through, disabling every animation that did not request a stagger. The tab grid opened completely blank, because its Opacity is declared 0 in XAML and the animation meant to raise it never ran.",
+      "rule": "Assign BeginTime only when a delay was actually requested. The failure mode is invisible in review: the call site looks correct and a disabled animation leaves a plausible value rather than throwing."
+    },
+    {
+      "id": "cmp.motion",
+      "type": "component",
+      "label": "Motion",
+      "file": "src/Hearth/Views/Motion.cs",
+      "summary": "The motion vocabulary in code: four durations, four easings, and animation factories. FadeAsync completes when the animation does, so callers do not have to guess a Task.Delay that runs short and reintroduces a visible seam.",
+      "invariant": "Only ever targets Opacity or a Transform."
+    },
+    {
+      "id": "cmp.framemeter",
+      "type": "component",
+      "label": "FrameMeter",
+      "file": "src/Hearth/Views/FrameMeter.cs",
+      "summary": "Counts composition frames across an animation and reports rate, CPU cost, and the number of frames longer than 25 ms. Only exists when HEARTH_TRACE=1.",
+      "rationale": "Smoothness was the one quality claim in the project that had never been measured. Long-frame count is the headline: mean frame rate saturates at the compositor cap and hides stalls, and process CPU time is too noisy in a process that also hosts a browser."
+    },
+    {
+      "id": "m.animation-smoothness",
+      "type": "metric",
+      "label": "Delivered animation smoothness",
+      "summary": "Tab grid entrance after 0013: 0.7 long frames (>25 ms) per 450 ms entrance across six runs, worst gap 17-78 ms, typically 70-120 fps. The animations are longer than before and drop fewer frames than before.",
+      "status": "measured-0013",
+      "instrument": "cmp.framemeter, HEARTH_TRACE=1",
+      "caveat": "Debug build on one machine with a high-refresh display, so absolute rates are not portable. Every claim in 0013 rests on a within-run A/B where only one thing varied."
+    },
+    {
+      "id": "commit.0013",
+      "type": "commit",
+      "label": "0013 - motion rework",
+      "summary": "A shared motion vocabulary applied app-wide, with previously static controls animated and press feedback added. Introduced frame instrumentation, which then disproved three assumptions: drop shadows were halving the frame rate, subtree opacity is not free, and caching the zoomed card to a bitmap cost three times the CPU of the VisualBrush it replaced.",
+      "doc": "docs/commits/0013-motion-rework.md"
     }
   ],
   "edges": [
@@ -1913,6 +1992,108 @@
       "from": "cmp.edgebar",
       "rel": "implements",
       "to": "commit.0012"
+    },
+    {
+      "from": "d.one-motion-vocabulary",
+      "rel": "implements",
+      "to": "commit.0013"
+    },
+    {
+      "from": "cmp.motion",
+      "rel": "implements",
+      "to": "d.one-motion-vocabulary"
+    },
+    {
+      "from": "cmp.framemeter",
+      "rel": "implements",
+      "to": "commit.0013"
+    },
+    {
+      "from": "cmp.motion",
+      "rel": "implements",
+      "to": "commit.0013"
+    },
+    {
+      "from": "k.subtree-opacity-is-not-free",
+      "rel": "constrains",
+      "to": "d.one-motion-vocabulary",
+      "note": "Corrects the rule the vocabulary was written with."
+    },
+    {
+      "from": "k.subtree-opacity-is-not-free",
+      "rel": "constrains",
+      "to": "cmp.mainwindow"
+    },
+    {
+      "from": "k.effects-are-per-frame",
+      "rel": "constrains",
+      "to": "cmp.mainwindow"
+    },
+    {
+      "from": "k.cached-bitmap-loses-to-visualbrush",
+      "rel": "constrains",
+      "to": "d.zoom-connects-card-to-page",
+      "note": "The zoom keeps the live VisualBrush; the cached-bitmap version was measured and reverted."
+    },
+    {
+      "from": "k.begintime-null-never-runs",
+      "rel": "constrains",
+      "to": "cmp.motion"
+    },
+    {
+      "from": "m.animation-smoothness",
+      "rel": "measured_by",
+      "to": "cmp.framemeter"
+    },
+    {
+      "from": "d.one-motion-vocabulary",
+      "rel": "measured_by",
+      "to": "m.animation-smoothness"
+    },
+    {
+      "from": "k.effects-are-per-frame",
+      "rel": "measured_by",
+      "to": "m.animation-smoothness"
+    },
+    {
+      "from": "k.subtree-opacity-is-not-free",
+      "rel": "measured_by",
+      "to": "m.animation-smoothness"
+    },
+    {
+      "from": "k.subtree-opacity-is-not-free",
+      "rel": "introduced_in",
+      "to": "commit.0013"
+    },
+    {
+      "from": "k.effects-are-per-frame",
+      "rel": "introduced_in",
+      "to": "commit.0013"
+    },
+    {
+      "from": "k.cached-bitmap-loses-to-visualbrush",
+      "rel": "introduced_in",
+      "to": "commit.0013"
+    },
+    {
+      "from": "k.begintime-null-never-runs",
+      "rel": "introduced_in",
+      "to": "commit.0013"
+    },
+    {
+      "from": "d.one-motion-vocabulary",
+      "rel": "introduced_in",
+      "to": "commit.0013"
+    },
+    {
+      "from": "m.animation-smoothness",
+      "rel": "introduced_in",
+      "to": "commit.0013"
+    },
+    {
+      "from": "cmp.framemeter",
+      "rel": "depends_on",
+      "to": "cmp.diag"
     }
   ]
 }
