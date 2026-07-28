@@ -2,7 +2,7 @@
   "project": "hearth",
   "description": "A low-resource Windows browser shell built on WebView2, whose core bet is that hibernated is a tab's default state and live is a budgeted exception.",
   "schema_version": "1.0",
-  "graph_updated_at_commit": "0014",
+  "graph_updated_at_commit": "0015",
   "consumer_notes": "This file is the authoritative machine-readable model of WHY this codebase is shaped the way it is. Source code records what the system does; this graph records the reasoning, the rejected alternatives, and the constraints that must not be violated. Agents should read this before proposing architectural changes. Every node has a stable `id` that is safe to reference in commits, issues, and other documents. When you add a feature, add its nodes/edges here in the same commit.",
   "node_types": {
     "problem": "An observed user-facing or system-level problem the project exists to solve.",
@@ -928,6 +928,118 @@
       "label": "0014 - identity",
       "summary": "Real application icon (arch-and-ember mark, generated and reproducible), wired as both ApplicationIcon and Window.Icon, plus assembly metadata and a browser-style window title. The app no longer shows the generic Windows icon or a WebView2 version string in the taskbar.",
       "doc": "docs/commits/0014-identity.md"
+    },
+    {
+      "id": "k.the-placeholder-was-never-visible",
+      "type": "constraint",
+      "label": "The hibernation placeholder was never once on screen",
+      "summary": "From 0004 to 0014 the shell painted an evicted tab's screenshot while its renderer rebuilt, and cross-faded it out when the page painted. Filmed at ~37 fps, a switch showed the page being left, then a near-black frame, then the new page cutting in. The snapshot was never visible at any point.",
+      "detail": "Two stacked causes. ActivateAsync left the OUTGOING page visible for the whole rebuild, so the placeholder sat under a live HWND; then it showed the INCOMING control the instant its renderer existed, a second or more before it had anything to draw, so the placeholder sat under an unpainted one. WebView2 paints over all WPF content whatever its Z-order or opacity (k.wpf-airspace), so the image was never on screen and the cross-fade at the end animated something nobody could see.",
+      "measurement": "Pane luminance across a cold-tab switch, budget 1: page left 229, mid-switch 18 and 78 across two runs, page arrived at 236. After the fix the minimum was 229, 185 and 232 with zero intermediate frames.",
+      "invariant": "A transition that hides a WebView2 must take the pages off screen BEFORE the rebuild and hold the new control back until its page has painted. There is no cross-fade available: the honest handoff is a cut between two images of the same page.",
+      "why_it_survived": "Every part of it is individually correct and the whole thing is invisible by construction. Only photographing the screen mid-transition finds it, which nothing did before 0015."
+    },
+    {
+      "id": "k.navigation-completed-is-not-first-paint",
+      "type": "constraint",
+      "label": "NavigationCompleted is about a second later than 'there is something to look at'",
+      "summary": "CoreWebView2.NavigationCompleted waits for every subresource on the page. Against google.com it fired after the startup curtain's 2.6 s ceiling had already given up, on a page that had been readable for a second.",
+      "detail": "DOMContentLoaded is the honest signal for 'the document exists'. BrowserTab now carries both: HasRendered for capture, which needs the strict one because photographing a half-built page produces a thumbnail of scaffolding, and HasContent for anything deciding when to stop covering the screen.",
+      "measurement": "Startup curtain went from hitting the 2600 ms ceiling to ending at 1.0-1.6 s, on the page rather than on a timeout.",
+      "detail_reveal": "The reveal gate picks between them: with a snapshot up it waits for the strict signal so the live page matches the picture it replaces; with no snapshot it reveals on DOMContentLoaded plus a longer beat, because revealing on the instant it fires showed the renderer's blank white page for a frame or two."
+    },
+    {
+      "id": "k.starving-the-layout-phase-blanks-webview2",
+      "type": "constraint",
+      "label": "A self-requeueing Loaded-priority callback blanks the page, not the control it belongs to",
+      "summary": "The tab marker retried at DispatcherPriority.Loaded whenever its chip had no size yet. In immersion the tab strip lives in an EdgeBar window that is not shown until the pointer reaches the screen edge, so its chips have no size and never will -- the retry ran forever.",
+      "detail": "Loaded priority runs inside the layout phase, so the loop kept that phase permanently busy. HwndHost shows the child window it hosts during a settled layout pass, never got one, and the WEB PAGE stayed blank for the life of the process. The failing control was not the one that showed the symptom.",
+      "measurement": "Immersion failed 5 starts out of 5. Browse always passed, because its status bar rewrites itself every two seconds and that was enough to let a pass through. Bounded to a single retry: 10 immersion starts out of 10, and 3/3 in each mode on the shipping build.",
+      "invariant": "A dispatcher callback that reschedules itself must have a bounded retry count. One that can never succeed does not fail loudly, it starves whatever shares its priority.",
+      "wrong_turns": "Bisected through the immersion browser switches, MaximiseFix.Fullscreen, the startup curtain, Visibility.Hidden versus Collapsed, and collapsing the content host instead of the control. All innocent. A mode carve-out disabling the new reveal in immersion was very nearly shipped as a documented limitation."
+    },
+    {
+      "id": "k.layered-windows-are-software-drawn",
+      "type": "constraint",
+      "label": "A WPF window with AllowsTransparency is composited in software",
+      "summary": "Per-pixel-alpha (layered) windows bypass the GPU: the whole window is composited on the UI thread every frame. At browser size that halves the frame rate.",
+      "measurement": "Three cold starts each, one build, only the curtain's exit path varying. Opaque: 8.0 ms/frame, 124-125 fps, 0/0/0 long frames, worst gap 9-16 ms, ~292 ms CPU. Window-opacity dissolve: 16.2 ms/frame, 56-67 fps, worst gap up to 114 ms, ~771 ms CPU. Half the frame rate and 2.6x the CPU for the same 1320x860 window.",
+      "detail": "The cost scales with pixel count, so a 4K display pays more. Measured at 1320x860.",
+      "revisit_if": "A composition-based route to a true window fade appears -- DirectComposition or WinUI hosting -- that does not go through a layered window."
+    },
+    {
+      "id": "d.startup-is-a-transition",
+      "type": "decision",
+      "label": "Startup is covered by a curtain carrying the mark, held until the first page has parsed",
+      "summary": "An opaque owned top-level window over the whole app, from before the environment exists until the active tab reports DOMContentLoaded, then the mark lifts away and the browser frame drops in behind it.",
+      "rationale": "Creating a browser process and loading a page takes seconds and used to happen in full view, as an empty grey window that looked hung. The wait is unavoidable; being shown nothing during it is not.",
+      "why_a_window": "An overlay inside MainWindow would be punched through by the first page that painted, in the middle of the screen, which is exactly where the mark is (k.wpf-airspace). The grid's answer -- collapse the content host -- is unavailable, because a WebView2 cannot finish initialising inside a collapsed panel and initialising is what the curtain covers.",
+      "timing": "Gated on real readiness with a 2.6 s ceiling and a 700 ms floor. A timed splash is wrong in both directions, and a curtain that appears and leaves inside 200 ms reads as a glitch rather than a transition.",
+      "revisit_if": "Startup drops below about half a second, at which point the curtain is longer than the thing it covers."
+    },
+    {
+      "id": "d.the-restart-is-a-transition",
+      "type": "decision",
+      "label": "A mode restart raises the same curtain on both sides of the process boundary",
+      "summary": "The outgoing process puts the mark up, launches its successor underneath it, and only then exits. The successor raises the same curtain the moment its window exists.",
+      "rationale": "Switching mode kills the application and starts another one, which cannot be hidden. The mark is the only thing that can survive the boundary, so it is what carries the continuity.",
+      "measurement": "Launching the successor before the exit rather than in the statement after it overlaps its startup with the curtain animation. One build, alternating: the window where neither process is on screen went from 1.15 s and 1.25 s to 0.66 s and 0.75 s.",
+      "detail": "Safe because the successor already waits for the handover before creating its environment (k.browser-args-fixed-at-creation), so overlapping costs nothing. AwaitHandover also became asynchronous: it used to block the UI thread, so the incoming window could not paint and a mode switch showed the unpainted white rectangle Windows draws for a hung application.",
+      "revisit_if": "Modes stop requiring a restart, which needs AdditionalBrowserArguments to become settable on a live environment."
+    },
+    {
+      "id": "d.reveal-when-the-page-is-ready",
+      "type": "decision",
+      "label": "A rebuilt tab's control is held back until its page has painted",
+      "summary": "TabManager hides every page at the start of a rebuild and does not show the incoming control until a shell-supplied gate returns. The gate holds the tab's snapshot, or the app's own ground and the loading bar when there is none.",
+      "rationale": "It is the only way the hibernation placeholder is ever on screen (k.the-placeholder-was-never-visible), and it removes the near-black frame that used to sit in the middle of every switch to an evicted tab.",
+      "detail": "The gate is awaited OUTSIDE the budget semaphore. It waits for a real page load, and holding that lock for a page load is exactly what made picking a tab from the grid hang in 0010 (k.collapsed-host-blocks-initialisation). If the user moves on while the page loads, the superseded tab does not get shown.",
+      "no_snapshot": "Rebuild is gated on the tab having no renderer rather than on a snapshot existing. Activating a never-visited tab used to leave the previous page up for the whole load; showing nothing is better than showing a page the user has just left.",
+      "revisit_if": "WebView2 gains a way to composite into WPF, at which point a real cross-fade becomes possible and the hold becomes unnecessary."
+    },
+    {
+      "id": "d.one-marker-travels",
+      "type": "decision",
+      "label": "Selection in the tab strip is one marker that moves, not a background that lights up",
+      "summary": "A single border slides and resizes between chips. The chips no longer paint their own selected state.",
+      "rationale": "Two chips fading in opposite directions read as two unrelated events. Browsers that move a single indicator read as continuous, because the eye tracks one object.",
+      "detail": "Its WIDTH is animated, a deliberate exception to d.animate-transforms-only: scaling a fixed-width border on X turns its rounded corners into ellipses over the length of the travel. Safe only because the marker lives in a Canvas, which reports no size of its own and gives children infinite space, so re-measuring it cannot change anything above it.",
+      "coalescing": "Sync runs on every state change a tab reports and a busy page reports dozens, since each refused subresource bumps the blocked count. Requests are coalesced onto one deferred pass and dropped when the geometry has not moved, or the marker permanently eases toward a position it is already at.",
+      "revisit_if": "The strip gains horizontal scrolling that the marker has to track."
+    },
+    {
+      "id": "d.motion-honours-the-system-switch",
+      "type": "decision",
+      "label": "Every transition honours Windows' 'show animations' setting; pointer feedback does not",
+      "summary": "SystemParameters.ClientAreaAnimation is read once in Motion and collapses every duration to a single tick when off. HEARTH_MOTION=0/1 pins it either way.",
+      "rationale": "A browser is exactly the kind of application people turn animations off for: weak hardware, remote desktop, or a vestibular disorder that makes a full-screen zoom genuinely unpleasant. Every other browser honours it. Reading it in one place means a transition added later cannot forget to.",
+      "detail": "It deliberately does not cover hover fills and press dips. Those are 70-130 ms, carry no travel, and removing them makes the controls feel broken rather than calm. What it covers is everything that MOVES something across the screen.",
+      "revisit_if": "An in-app settings surface exists, at which point this becomes a visible preference rather than an inherited one."
+    },
+    {
+      "id": "cmp.veil",
+      "type": "component",
+      "label": "Veil",
+      "file": "src/Hearth/Views/Veil.cs",
+      "summary": "The full-window curtain: an opaque, owned, non-activating top-level window carrying the Hearth mark. Used for the startup cover and for the mode-restart handoff.",
+      "rationale": "A sibling HWND composites above WebView2, which is the only way to cover a live page without hiding it (d.airspace-needs-a-second-window).",
+      "invariant": "Opaque, never AllowsTransparency. A layered window at this size is software-composited and costs half the frame rate (k.layered-windows-are-software-drawn). HEARTH_VEIL=dissolve keeps the transparent variant reachable for comparison."
+    },
+    {
+      "id": "cmp.hearth-mark",
+      "type": "component",
+      "label": "HearthMark",
+      "file": "src/Hearth/Views/HearthMark.xaml",
+      "summary": "The arch-and-ember mark drawn as vector geometry, with a slow breath on the ember's halo while the browser starts.",
+      "rationale": "The curtain shows the mark at 118 px and growing, so scaling up a 256 px bitmap would go soft at exactly the moment it is the only thing on screen. The coordinates are the icon generator's, converted to a 100-unit box, so tools/make-icon.py stays the source of the design (d.hearth-mark).",
+      "invariant": "The breath is one Opacity on one small leaf: no effect, no layout, no transform. It runs during the busiest moment in the process and its only job is to say the application is alive rather than hung."
+    },
+    {
+      "id": "commit.0015",
+      "type": "commit",
+      "label": "0015 - transitions",
+      "summary": "Startup curtain and mode-restart handoff carrying the mark; the hibernation placeholder made visible for the first time since 0004; a travelling tab-strip marker with chip entrance and exit; a hover-expanding square immersion chip; system reduced-motion honoured. Plus the layout-starvation loop that blanked the page in immersion, and a collapsed-controller capture that hung a switch outright.",
+      "doc": "docs/commits/0015-transitions.md"
     }
   ],
   "edges": [
@@ -2148,6 +2260,188 @@
       "rel": "constrains",
       "to": "cmp.mainwindow",
       "note": "Window.Icon and ApplicationIcon are separate settings and both are required."
+    },
+    {
+      "from": "d.startup-is-a-transition",
+      "rel": "introduced_in",
+      "to": "commit.0015"
+    },
+    {
+      "from": "d.the-restart-is-a-transition",
+      "rel": "introduced_in",
+      "to": "commit.0015"
+    },
+    {
+      "from": "d.reveal-when-the-page-is-ready",
+      "rel": "introduced_in",
+      "to": "commit.0015"
+    },
+    {
+      "from": "d.one-marker-travels",
+      "rel": "introduced_in",
+      "to": "commit.0015"
+    },
+    {
+      "from": "d.motion-honours-the-system-switch",
+      "rel": "introduced_in",
+      "to": "commit.0015"
+    },
+    {
+      "from": "cmp.veil",
+      "rel": "introduced_in",
+      "to": "commit.0015"
+    },
+    {
+      "from": "cmp.hearth-mark",
+      "rel": "introduced_in",
+      "to": "commit.0015"
+    },
+    {
+      "from": "k.the-placeholder-was-never-visible",
+      "rel": "introduced_in",
+      "to": "commit.0015"
+    },
+    {
+      "from": "k.navigation-completed-is-not-first-paint",
+      "rel": "introduced_in",
+      "to": "commit.0015"
+    },
+    {
+      "from": "k.starving-the-layout-phase-blanks-webview2",
+      "rel": "introduced_in",
+      "to": "commit.0015"
+    },
+    {
+      "from": "k.layered-windows-are-software-drawn",
+      "rel": "introduced_in",
+      "to": "commit.0015"
+    },
+    {
+      "from": "k.the-placeholder-was-never-visible",
+      "rel": "motivated_by",
+      "to": "k.wpf-airspace",
+      "note": "The image sat under a child HWND, which paints over all WPF content whatever its opacity."
+    },
+    {
+      "from": "d.reveal-when-the-page-is-ready",
+      "rel": "motivated_by",
+      "to": "k.the-placeholder-was-never-visible"
+    },
+    {
+      "from": "d.reveal-when-the-page-is-ready",
+      "rel": "constrains",
+      "to": "cmp.tabmanager",
+      "note": "The reveal gate is awaited outside the budget semaphore, or a page load blocks every other switch."
+    },
+    {
+      "from": "d.reveal-when-the-page-is-ready",
+      "rel": "depends_on",
+      "to": "k.navigation-completed-is-not-first-paint",
+      "note": "Which signal to wait for depends on whether a snapshot is on screen to match."
+    },
+    {
+      "from": "d.reveal-when-the-page-is-ready",
+      "rel": "supersedes",
+      "to": "d.snapshot-handoff-covers-the-load",
+      "note": "The snapshot survives; the cross-fade it was supposed to end with never existed and is now a cut."
+    },
+    {
+      "from": "cmp.veil",
+      "rel": "implements",
+      "to": "d.startup-is-a-transition"
+    },
+    {
+      "from": "cmp.veil",
+      "rel": "implements",
+      "to": "d.the-restart-is-a-transition"
+    },
+    {
+      "from": "cmp.veil",
+      "rel": "motivated_by",
+      "to": "d.airspace-needs-a-second-window",
+      "note": "Third use of the same escape hatch: a sibling HWND is the only thing that composites above a page."
+    },
+    {
+      "from": "cmp.veil",
+      "rel": "constrains",
+      "to": "k.layered-windows-are-software-drawn",
+      "note": "Staying opaque is what keeps the curtain at 124 fps."
+    },
+    {
+      "from": "cmp.hearth-mark",
+      "rel": "implements",
+      "to": "d.hearth-mark"
+    },
+    {
+      "from": "cmp.veil",
+      "rel": "depends_on",
+      "to": "cmp.hearth-mark"
+    },
+    {
+      "from": "d.the-restart-is-a-transition",
+      "rel": "motivated_by",
+      "to": "k.browser-args-fixed-at-creation",
+      "note": "The restart cannot be avoided, so the transition across it is all that can be improved."
+    },
+    {
+      "from": "d.startup-is-a-transition",
+      "rel": "depends_on",
+      "to": "k.navigation-completed-is-not-first-paint",
+      "note": "The curtain lifts on DOMContentLoaded; the stricter signal made it time out on a readable page."
+    },
+    {
+      "from": "d.one-marker-travels",
+      "rel": "constrains",
+      "to": "cmp.mainwindow"
+    },
+    {
+      "from": "d.one-marker-travels",
+      "rel": "rejected_in_favour_of",
+      "to": "d.one-motion-vocabulary",
+      "note": "Width is animated here rather than a transform, bounded inside a Canvas so the invalidation cannot escape."
+    },
+    {
+      "from": "k.starving-the-layout-phase-blanks-webview2",
+      "rel": "motivated_by",
+      "to": "d.one-marker-travels",
+      "note": "The unbounded retry that caused it was the marker waiting for a chip that would never be laid out."
+    },
+    {
+      "from": "k.starving-the-layout-phase-blanks-webview2",
+      "rel": "constrains",
+      "to": "cmp.edgebar",
+      "note": "Immersion's chrome lives in windows that may never be shown, so anything polling it must give up."
+    },
+    {
+      "from": "d.motion-honours-the-system-switch",
+      "rel": "constrains",
+      "to": "cmp.motion"
+    },
+    {
+      "from": "d.motion-honours-the-system-switch",
+      "rel": "motivated_by",
+      "to": "d.one-motion-vocabulary"
+    },
+    {
+      "from": "k.layered-windows-are-software-drawn",
+      "rel": "measured_by",
+      "to": "cmp.framemeter"
+    },
+    {
+      "from": "d.startup-is-a-transition",
+      "rel": "measured_by",
+      "to": "cmp.framemeter"
+    },
+    {
+      "from": "k.the-placeholder-was-never-visible",
+      "rel": "measured_by",
+      "to": "m.animation-smoothness"
+    },
+    {
+      "from": "k.capture-requires-live",
+      "rel": "constrains",
+      "to": "cmp.tabmanager",
+      "note": "CapturePreviewAsync on a collapsed controller never returns, and it is called holding the budget semaphore."
     }
   ]
 }

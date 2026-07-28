@@ -42,6 +42,21 @@ public partial class MainWindow : Window
     private long _peakBytes;
     private WindowState _stateBeforeBigPicture = WindowState.Normal;
 
+    /// <summary>Width the immersion chip's label needs once revealed.</summary>
+    private double _immersionLabelWidth;
+
+    /// <summary>False until the travelling tab indicator has a position to move FROM.</summary>
+    private bool _indicatorPlaced;
+
+    /// <summary>Where the indicator is heading, so a repeat request can be dropped.</summary>
+    private double _indicatorX;
+    private double _indicatorWidth;
+    private bool _indicatorQueued;
+    private bool _indicatorRetried;
+
+    /// <summary>Tabs playing their closing animation, so a second press is ignored.</summary>
+    private readonly HashSet<BrowserTab> _closingTabs = [];
+
     private readonly SessionStore _session = new();
 
     /// <summary>Set while restarting, so the exit handler does not fight it.</summary>
@@ -73,23 +88,53 @@ public partial class MainWindow : Window
         // layout, the memory readout, disappears when maximised.
         MaximiseFix.Attach(this);
 
+        // The chrome starts invisible so the startup curtain has something to
+        // hand over TO. Set here rather than in XAML deliberately: if the reveal
+        // never runs -- an exception during startup, a mode that never calls it
+        // -- a window with Opacity="0" baked into the markup would be a browser
+        // with no controls and no way to find out why. Every path that hides it
+        // is paired with a finally that puts it back.
+        //
+        // Immersion is exempt: its chrome is not in this window's layout at all,
+        // it has been lifted into the EdgeBar windows, and those manage their
+        // own opacity. Dimming it here would leave the edge bars permanently
+        // blank.
+        if (Motion.Enabled && !Immersive)
+            foreach (var part in Chrome) part.Opacity = 0;
+
         Loaded += OnLoaded;
         Closing += OnClosing;
         StateChanged += (_, _) => UpdateMaximiseGlyph();
+        SizeChanged += (_, _) => UpdateTabIndicator(animate: false);
     }
+
+    /// <summary>The three strips that make up the browser frame, top to bottom.</summary>
+    private UIElement[] Chrome => [TitleBar, NavBar, StatusBar];
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
+        // The curtain goes up FIRST, before the handover wait and before the
+        // environment exists. Everything after this line can take seconds --
+        // waiting for the previous process to die, creating the browser process,
+        // loading a page -- and all of it used to happen in full view, as an
+        // empty grey window that looked hung (d.startup-is-a-transition).
+        var veil = Veil.Cover(this, Immersive ? "Immersion" : null);
+        var startupClock = Stopwatch.StartNew();
+
         // A mode switch relaunches the process, and the outgoing instance still
         // holds the WebView2 user-data folder. Creating the environment before
         // it lets go fails outright, so wait for the handover first.
-        App.AwaitHandover();
+        await App.AwaitHandoverAsync();
 
         _tabs = new TabManager(ContentHost, HearthOptions.FromEnvironment(App.Mode));
         _tabs.Changed += (_, _) => Dispatcher.Invoke(Sync);
+        // The three beats of a rebuild, in order: the snapshot goes up, the page
+        // loads behind it, the live control replaces it. Before 0015 the middle
+        // beat did not exist and the first two ran back to back, which is why
+        // the snapshot was never on screen (k.the-placeholder-was-never-visible).
         _tabs.Rehydrating += (_, tab) => Dispatcher.Invoke(() => ShowPlaceholder(tab));
-        _tabs.Rehydrated += (_, tab) => Dispatcher.InvokeAsync(
-            async () => await HoldPlaceholderUntilPaintedAsync(tab));
+        _tabs.RevealGate = HoldPlaceholderUntilPaintedAsync;
+        _tabs.Rehydrated += (_, _) => Dispatcher.Invoke(HidePlaceholder);
 
         // Every new renderer gets the keyboard hook. Attaching here rather than
         // once at startup is not an optimisation -- a tab torn down by the
@@ -106,7 +151,15 @@ public partial class MainWindow : Window
         TabStrip.ItemsSource = _tabs.Tabs;
         TabWall.ItemsSource = _tabs.Tabs;
 
+        // A chip that simply exists on the next frame is the one place the tab
+        // strip still cut rather than moved. Opening a tab is the most frequent
+        // structural change in a browser, so it is worth animating even though
+        // the chip is small.
+        ((System.Collections.Specialized.INotifyCollectionChanged)_tabs.Tabs)
+            .CollectionChanged += OnTabsChanged;
+
         ApplyMode();
+        MeasureImmersionChip();
 
         var startup = App.StartupUrls();
 
@@ -121,7 +174,14 @@ public partial class MainWindow : Window
             // and the browser would never start again.
             _session.Clear();
 
-            if (active is not null) await _tabs.ActivateAsync(active);
+            // NOT awaited. A restored tab is cold and has a snapshot, so
+            // activating it goes through the reveal gate, which waits for the
+            // page to paint -- awaiting that here would put a page load between
+            // the window opening and the curtain being allowed to consider
+            // coming down. It measured as a nine-second startup curtain, and
+            // the fix is to let the two run alongside each other, which is what
+            // the curtain is for.
+            if (active is not null) _ = _tabs.ActivateAsync(active);
         }
         else if (startup.Length == 0)
         {
@@ -163,6 +223,123 @@ public partial class MainWindow : Window
             Debug.WriteLine($"[hearth] page-level shortcuts unavailable: {hookError}");
 
         Sync();
+
+        await FinishStartupAsync(veil, startupClock);
+    }
+
+    // ------------------------------------------------------------------------
+    // Startup
+    // ------------------------------------------------------------------------
+
+    /// <summary>
+    /// Lowers the startup curtain and brings the browser in behind it.
+    ///
+    /// The curtain is held until the first page has actually painted rather than
+    /// for a fixed beat, for the same reason the rehydration placeholder is
+    /// (0013): a timed splash is wrong in both directions. Too short and the
+    /// curtain drops onto a blank content area, which is a worse first frame
+    /// than the curtain itself; too long and the browser is deliberately slower
+    /// than it needs to be.
+    ///
+    /// There is a floor as well as a ceiling. A curtain that appears and leaves
+    /// inside 200 ms is a flash, not a transition, and reads as a glitch --
+    /// warm-start Hearth reaches first paint quickly enough for that to happen.
+    /// </summary>
+    private async Task FinishStartupAsync(Veil veil, Stopwatch clock)
+    {
+        try
+        {
+            // The clock started when the window loaded, not when this method
+            // was reached, so the ceiling caps the time the USER waits rather
+            // than the time this method waits.
+            var ceiling = TimeSpan.FromMilliseconds(2600);
+            var floor = TimeSpan.FromMilliseconds(Motion.Enabled ? 700 : 0);
+
+            // The benchmark path deliberately activates every startup URL in
+            // turn and can run for a minute; nobody is watching it, and leaving
+            // a curtain over the run would also cover its screenshots.
+            var benchmarking =
+                Environment.GetEnvironmentVariable("HEARTH_ACTIVATE_ALL") is "1" or "true";
+
+            if (!benchmarking)
+            {
+                // HasContent, not HasRendered. The stricter signal waits for
+                // every subresource on the page, and measured against
+                // google.com it fires roughly a second after the layout a
+                // person would call loaded -- so the curtain was routinely
+                // timing out on a page that had been readable for a while
+                // (k.navigation-completed-is-not-first-paint).
+                while (clock.Elapsed < ceiling && _tabs?.Active?.HasContent != true)
+                    await Task.Delay(50);
+
+                if (floor - clock.Elapsed is { Ticks: > 0 } remaining)
+                    await Task.Delay(remaining);
+            }
+
+            Diag.Log($"startup: curtain held {clock.ElapsedMilliseconds} ms, "
+                   + $"content={_tabs?.Active?.HasContent == true}");
+
+            await veil.DismissAsync();
+
+            await RevealChromeAsync();
+        }
+        catch (Exception ex)
+        {
+            // Nothing about a transition is worth losing the browser over.
+            Diag.Log($"startup reveal failed: {ex.Message}");
+            veil.Release();
+        }
+        finally
+        {
+            foreach (var part in Chrome)
+            {
+                part.BeginAnimation(OpacityProperty, null);
+                part.Opacity = 1;
+            }
+        }
+    }
+
+    /// <summary>
+    /// The browser arrives from behind the curtain: the two top strips drop in
+    /// from above and the status bar rises from below, each fading as it moves,
+    /// so the frame assembles around the page rather than switching on.
+    ///
+    /// The page itself does not participate, and cannot: WebView2 is a child
+    /// HWND that ignores WPF opacity entirely (k.wpf-airspace). This is the same
+    /// reason the theme switch fades only the chrome.
+    /// </summary>
+    private async Task RevealChromeAsync()
+    {
+        // In immersion the strips live in the EdgeBar windows and are concealed
+        // by design -- there is no frame to assemble.
+        if (Immersive || !Motion.Enabled) return;
+
+        using var meter = FrameMeter.Start("chrome-reveal");
+
+        var arrivals = new (FrameworkElement Part, double FromY, TimeSpan Delay)[]
+        {
+            (TitleBar, -14, TimeSpan.Zero),
+            (NavBar, -10, TimeSpan.FromMilliseconds(60)),
+            (StatusBar, 12, TimeSpan.FromMilliseconds(40))
+        };
+
+        var running = new List<Task>();
+
+        foreach (var (part, fromY, delay) in arrivals)
+        {
+            var slide = new TranslateTransform(0, fromY);
+            part.RenderTransform = slide;
+
+            part.BeginAnimation(OpacityProperty,
+                Motion.From(0, 1, Motion.Slow, Motion.Enter, delay));
+
+            running.Add(Motion.RunAsync(slide, TranslateTransform.YProperty,
+                Motion.From(fromY, 0, Motion.Slow, Motion.Emphasis, delay)));
+        }
+
+        await Task.WhenAll(running);
+
+        foreach (var (part, _, _) in arrivals) part.RenderTransform = Transform.Identity;
     }
 
     // ------------------------------------------------------------------------
@@ -285,14 +462,40 @@ public partial class MainWindow : Window
     /// written first: everything in memory is about to be discarded, and losing
     /// a user's tabs because they changed a setting would make the setting
     /// unusable.
+    ///
+    /// The curtain goes up before the relaunch, and the incoming process raises
+    /// the same curtain the moment its window exists, so a mode change reads as
+    /// ONE transition rather than an application vanishing and a different one
+    /// appearing (d.the-restart-is-a-transition). It is the same mark either
+    /// side of the process boundary, which is the only continuity available:
+    /// nothing else survives, by construction.
     /// </summary>
-    private void RestartInto(HearthMode mode)
+    private async void RestartInto(HearthMode mode)
     {
         if (_tabs is null || _restarting) return;
         _restarting = true;
 
         _session.Save(_tabs.CaptureSession());
-        App.RestartInto(mode);
+
+        var veil = Veil.Cover(this, mode == HearthMode.Immersion
+            ? "Restarting into immersion"
+            : "Returning to browsing");
+
+        // The successor starts NOW, under the curtain, and spends its own
+        // startup in parallel with this animation rather than after it.
+        if (!App.StartSuccessor(mode))
+        {
+            veil.Release();
+            _restarting = false;
+            return;
+        }
+
+        // Then wait for the curtain to be fully up before exiting. Dying
+        // underneath a half-faded one puts the seam in the middle of the
+        // animation, which is the most visible place it could be.
+        await Task.Delay(Motion.Wait(Motion.Slow));
+
+        App.HandOver();
     }
 
     private void Immersion_Click(object sender, RoutedEventArgs e) =>
@@ -352,7 +555,7 @@ public partial class MainWindow : Window
                 return true;
 
             case BrowserCommand.CloseTab:
-                if (_tabs.Active is { } closing) _tabs.Close(closing);
+                if (_tabs.Active is { } closing) _ = CloseTabAsync(closing);
                 return true;
 
             case BrowserCommand.ReopenClosedTab:
@@ -593,6 +796,12 @@ public partial class MainWindow : Window
         if (!ReferenceEquals(TabStrip.SelectedItem, active)) TabStrip.SelectedItem = active;
         _syncing = false;
 
+        // A title arriving changes a chip's width, so the marker has to follow
+        // it. Queued rather than called: the chip has not been re-measured yet
+        // at the moment the title lands, and Sync runs far more often than the
+        // strip actually changes.
+        QueueTabIndicator();
+
         var core = active?.View?.CoreWebView2;
         BackButton.IsEnabled = core?.CanGoBack ?? false;
         ForwardButton.IsEnabled = core?.CanGoForward ?? false;
@@ -681,9 +890,12 @@ public partial class MainWindow : Window
     {
         if (_tabs?.Snapshots.Get(tab.Id) is not { } snap || !File.Exists(snap.ImagePath))
         {
+            Diag.Log($"placeholder: no snapshot for {tab.HostLabel}");
             HidePlaceholder();
             return;
         }
+
+        Diag.Log($"placeholder: showing {tab.HostLabel}");
 
         try
         {
@@ -715,42 +927,55 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Dissolves the placeholder instead of cutting it. The frame underneath is
-    /// the same page at the same scroll offset, so a hard swap reads as a flash
-    /// where a fade reads as the page sharpening into focus.
-    /// </summary>
-    private async Task FadeOutPlaceholderAsync()
-    {
-        if (Placeholder.Visibility != Visibility.Visible) return;
-
-        StopLoading();
-        await Motion.FadeAsync(Placeholder, 0, Motion.Slow, Motion.Enter);
-        HidePlaceholder();
-    }
-
-    /// <summary>
-    /// Holds the placeholder until the tab has actually painted, then dissolves
-    /// it.
+    /// Holds the snapshot on screen until the rebuilt tab has actually painted.
+    /// Returning is what lets the live control be shown.
     ///
-    /// This replaces a flat 220 ms wait, which commit 0004 recorded as a guess
-    /// rather than a measurement. A guess is wrong in both directions: too short
-    /// for a cold tab doing a real network load, so the placeholder vanished and
-    /// left a blank pane, and needlessly long for a tab that was already warm.
-    /// NavigationCompleted sets HasRendered, which is the real signal.
+    /// The wait replaces a flat 220 ms guess from commit 0004, and a guess is
+    /// wrong in both directions: too short for a cold tab doing a real network
+    /// load, needlessly long for one that was already warm. NavigationCompleted
+    /// sets HasRendered, which is the real signal.
+    ///
+    /// NOT A CROSS-FADE, and it never was. Through 0014 this method ended by
+    /// dissolving the placeholder over Motion.Slow, which reads well in source
+    /// and did nothing at all on screen: by that point the live WebView2 was
+    /// already up, and a child HWND covers WPF content whatever its opacity
+    /// (k.wpf-airspace). The honest transition available here is to hold the
+    /// picture until the real thing is ready and then cut -- which is invisible,
+    /// because both frames are the same page at the same scroll offset. It is
+    /// the same handoff the tab grid uses when a card becomes a page.
     /// </summary>
     private async Task HoldPlaceholderUntilPaintedAsync(BrowserTab tab)
     {
         StartLoading();
 
+        // WHICH signal to wait for depends on whether there is a picture up.
+        //
+        // With a snapshot on screen, the wait is for the live page to MATCH it,
+        // so the cut between the two is invisible: that is NavigationCompleted,
+        // the strict signal. With no snapshot the user is looking at the app's
+        // empty ground, and there is nothing to match -- the page should arrive
+        // the moment it exists, which is DOMContentLoaded
+        // (k.navigation-completed-is-not-first-paint).
+        var holdingPicture = Placeholder.Visibility == Visibility.Visible;
+
         // Cap the wait. A page that never finishes loading must not leave a
         // screenshot pinned over it forever.
-        for (var waited = 0; waited < 100 && !tab.HasRendered; waited++)
+        for (var waited = 0; waited < 100; waited++)
+        {
+            if (holdingPicture ? tab.HasRendered : tab.HasContent) break;
             await Task.Delay(50);
+        }
 
         // One more beat so the first painted frame is actually up before the
-        // picture covering it goes away.
-        await Task.Delay(90);
-        await FadeOutPlaceholderAsync();
+        // control is shown. Longer without a picture, because DOMContentLoaded
+        // means the document is PARSED, not drawn: revealing on the instant it
+        // fires showed the renderer's blank white page for a frame or two
+        // before the site appeared, and a white flash on a dark browser is the
+        // most visible failure available.
+        await Task.Delay(holdingPicture ? 90 : 260);
+
+        Diag.Log($"reveal {tab.HostLabel}: picture={holdingPicture} "
+               + $"content={tab.HasContent} painted={tab.HasRendered}");
     }
 
     private void StartLoading()
@@ -819,16 +1044,239 @@ public partial class MainWindow : Window
 
     private void CloseTab_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is Button { Tag: BrowserTab tab }) _tabs?.Close(tab);
+        if (sender is Button { Tag: BrowserTab tab }) _ = CloseTabAsync(tab);
         e.Handled = true;
     }
 
     private void TabStrip_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        UpdateTabIndicator();
+
         if (_syncing || _tabs is null) return;
         if (TabStrip.SelectedItem is BrowserTab tab && !ReferenceEquals(tab, _tabs.Active))
             _ = _tabs.ActivateAsync(tab);
     }
+
+    // ------------------------------------------------------------------------
+    // The tab strip
+    // ------------------------------------------------------------------------
+
+    /// <summary>
+    /// Moves the one selection marker to the selected chip.
+    ///
+    /// Position is a transform and therefore free; WIDTH is a layout property
+    /// and is animated anyway, which is a deliberate exception to
+    /// d.animate-transforms-only rather than an oversight. The alternative,
+    /// scaling a fixed-width border on X, distorts its rounded corners into
+    /// ellipses over the length of the travel. The exception is safe only
+    /// because the marker lives in a Canvas: a Canvas reports no size of its
+    /// own and gives children infinite space, so re-measuring this border cannot
+    /// change anything above it. The invalidation stops at the Canvas instead of
+    /// walking out into the tab strip and the window.
+    /// </summary>
+    private void UpdateTabIndicator(bool animate = true)
+    {
+        if (TabStrip.SelectedItem is null)
+        {
+            _indicatorPlaced = false;
+            TabIndicator.BeginAnimation(OpacityProperty, Motion.To(0, Motion.Quick, Motion.Exit));
+            return;
+        }
+
+        if (TabStrip.ItemContainerGenerator.ContainerFromItem(TabStrip.SelectedItem)
+            is not ListBoxItem chip || chip.ActualWidth <= 0)
+        {
+            // The container has not been generated or laid out yet -- opening
+            // the first tab always lands here. Try again once layout has run,
+            // but ONLY ONCE.
+            //
+            // Retrying unconditionally is an endless self-scheduling loop, and
+            // it does not stay theoretical: in immersion the tab strip is lifted
+            // into an EdgeBar window that is not shown until the pointer reaches
+            // the top of the screen, so its chips have no size and never will.
+            // The queue is at Loaded priority, which runs inside the layout
+            // phase, so the loop kept that phase permanently busy -- and the
+            // symptom was nothing to do with the tab strip at all: the page went
+            // blank, because HwndHost never got a settled layout pass in which
+            // to show the window it hosts (k.starving-the-layout-phase-blanks-webview2).
+            if (!_indicatorRetried)
+            {
+                _indicatorRetried = true;
+                QueueTabIndicator();
+            }
+            return;
+        }
+
+        _indicatorRetried = false;
+
+        var origin = chip.TransformToVisual(TabIndicatorLayer).Transform(new Point(0, 0));
+
+        // Sync runs on every state change a tab reports, and a busy page reports
+        // dozens: each refused subresource bumps the blocked count. Restarting
+        // the travel animation on every one of those would leave the marker
+        // permanently easing towards a position it is already at, which looks
+        // like a stutter and is one.
+        if (_indicatorPlaced
+            && Math.Abs(origin.X - _indicatorX) < 0.5
+            && Math.Abs(chip.ActualWidth - _indicatorWidth) < 0.5) return;
+
+        _indicatorX = origin.X;
+        _indicatorWidth = chip.ActualWidth;
+
+        Canvas.SetTop(TabIndicator, origin.Y);
+        TabIndicator.Height = chip.ActualHeight;
+
+        // The first placement is a jump, not a slide. There is nowhere to travel
+        // from, and animating in from x=0 would send the marker skating across
+        // the strip every time the browser starts.
+        if (!_indicatorPlaced || !animate)
+        {
+            TabIndicator.BeginAnimation(WidthProperty, null);
+            TabIndicatorShift.BeginAnimation(TranslateTransform.XProperty, null);
+
+            TabIndicator.Width = chip.ActualWidth;
+            TabIndicatorShift.X = origin.X;
+
+            if (!_indicatorPlaced)
+                TabIndicator.BeginAnimation(OpacityProperty, Motion.From(0, 1, Motion.Base));
+
+            _indicatorPlaced = true;
+            return;
+        }
+
+        // Symmetric easing, because this is travel between two places: the
+        // fastest part is the middle, which is how a real object crosses a gap.
+        TabIndicator.BeginAnimation(WidthProperty,
+            Motion.To(chip.ActualWidth, Motion.Base, Motion.Travel));
+        TabIndicatorShift.BeginAnimation(TranslateTransform.XProperty,
+            Motion.To(origin.X, Motion.Base, Motion.Travel));
+    }
+
+    /// <summary>
+    /// Coalesces indicator updates onto one deferred pass. Called from several
+    /// places that each fire more often than the strip actually moves.
+    /// </summary>
+    private void QueueTabIndicator()
+    {
+        if (_indicatorQueued) return;
+        _indicatorQueued = true;
+
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
+        {
+            _indicatorQueued = false;
+            UpdateTabIndicator();
+        });
+    }
+
+    private void OnTabsChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+    {
+        QueueTabIndicator();
+
+        if (e.Action is not System.Collections.Specialized.NotifyCollectionChangedAction.Add) return;
+        if (e.NewItems is null || !Motion.Enabled) return;
+
+        foreach (BrowserTab added in e.NewItems)
+        {
+            // The container does not exist until the ItemsControl has generated
+            // and laid it out, so the entrance is queued rather than started.
+            var tab = added;
+            Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => AnimateChipIn(tab));
+        }
+    }
+
+    /// <summary>
+    /// A new chip slides in from the left edge of its own slot.
+    ///
+    /// Not a width expansion, which is what Chrome does: growing a chip from
+    /// zero re-measures the whole strip on every frame, and the strip is inside
+    /// the window's caption. A short travel plus a fade buys the same reading --
+    /// something arrived here -- for a transform and an opacity.
+    /// </summary>
+    private void AnimateChipIn(BrowserTab tab)
+    {
+        if (TabStrip.ItemContainerGenerator.ContainerFromItem(tab) is not ListBoxItem chip)
+            return;
+
+        var slide = new TranslateTransform(-16, 0);
+        chip.RenderTransform = slide;
+
+        chip.BeginAnimation(OpacityProperty, Motion.From(0, 1, Motion.Base));
+        slide.BeginAnimation(TranslateTransform.XProperty,
+            Motion.From(-16, 0, Motion.Slow, Motion.Emphasis));
+    }
+
+    /// <summary>
+    /// Plays the chip out before the tab is actually closed.
+    ///
+    /// The exit lives in the shell rather than in TabManager, and the ordering
+    /// is the reason: the manager removes a tab synchronously, and it should
+    /// keep doing that. Making the model wait for an animation would put a
+    /// presentation concern inside the class that owns renderer lifetime, which
+    /// is the last place it belongs.
+    /// </summary>
+    private async Task CloseTabAsync(BrowserTab tab)
+    {
+        if (_tabs is null || !_closingTabs.Add(tab)) return;
+
+        try
+        {
+            if (Motion.Enabled
+                && TabStrip.ItemContainerGenerator.ContainerFromItem(tab) is ListBoxItem chip)
+            {
+                var slide = new TranslateTransform();
+                chip.RenderTransform = slide;
+
+                slide.BeginAnimation(TranslateTransform.XProperty,
+                    Motion.To(-14, Motion.Quick, Motion.Exit));
+                await Motion.FadeAsync(chip, 0, Motion.Quick, Motion.Exit);
+            }
+
+            _tabs.Close(tab);
+        }
+        finally
+        {
+            _closingTabs.Remove(tab);
+        }
+    }
+
+    /// <summary>
+    /// Sizes the immersion chip's two states from the real text metrics, so the
+    /// hover expansion lands exactly on the label rather than on a number
+    /// somebody typed once and that a font change would falsify.
+    ///
+    /// The slot is fixed at the EXPANDED size and the button is right-aligned
+    /// inside it, so expansion consumes space that was already reserved. Nothing
+    /// outside the slot re-measures and no neighbouring control moves.
+    /// </summary>
+    private void MeasureImmersionChip()
+    {
+        var unbounded = new Size(double.PositiveInfinity, double.PositiveInfinity);
+
+        ImmersionLabel.Measure(unbounded);
+        _immersionLabelWidth = ImmersionLabel.DesiredSize.Width;
+
+        // The clip's child is a Canvas, which reports no height of its own, so
+        // the clip has to be told how tall the text it is hiding actually is.
+        ImmersionLabelClip.Height = ImmersionLabel.DesiredSize.Height;
+        ImmersionLabelClip.Width = 0;
+
+        ImmersionButton.Measure(unbounded);
+        ImmersionSlot.Width = ImmersionButton.DesiredSize.Width + _immersionLabelWidth;
+
+        ImmersionButton.MouseEnter += (_, _) => ExpandImmersionChip(true);
+        ImmersionButton.MouseLeave += (_, _) => ExpandImmersionChip(false);
+
+        // Keyboard focus opens it too. A control whose meaning is only available
+        // to a pointer is one a keyboard user has to guess at.
+        ImmersionButton.GotKeyboardFocus += (_, _) => ExpandImmersionChip(true);
+        ImmersionButton.LostKeyboardFocus += (_, _) => ExpandImmersionChip(false);
+    }
+
+    private void ExpandImmersionChip(bool open) =>
+        ImmersionLabelClip.BeginAnimation(WidthProperty, Motion.To(
+            open ? _immersionLabelWidth : 0,
+            open ? Motion.Base : Motion.Quick,
+            open ? Motion.Emphasis : Motion.Exit));
 
     // ------------------------------------------------------------------------
     // The tab grid
@@ -1128,10 +1576,23 @@ public partial class MainWindow : Window
             // handoff there is a hole between the animation ending and the page
             // painting, which is precisely what made the transition feel clunky.
             ShowPlaceholder(tab);
+
+            // Take the pages off screen before the shell comes back. The grid
+            // has to uncollapse the content host before it can activate
+            // anything, and whatever was live is still sitting in it -- filmed,
+            // that showed as a frame of the page being LEFT appearing between
+            // the card finishing its zoom and the new page arriving.
+            _tabs.Blank();
+
             await CrossFadeGridOutAsync();
 
+            // The hold now happens inside ActivateAsync, through the reveal
+            // gate, so a card that needs rebuilding keeps its picture up until
+            // the page is ready. A card that was already live has nothing to
+            // wait for and the live control is already covering this, so all
+            // that is left is to put the placeholder away.
             await LeaveGridAsync(zoomed: true, activate: tab);
-            await HoldPlaceholderUntilPaintedAsync(tab);
+            HidePlaceholder();
 
             Diag.Log($"grid: opened {tab.HostLabel}");
         }

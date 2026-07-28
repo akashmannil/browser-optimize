@@ -46,6 +46,31 @@
                           VerticalScrollBarVisibility="Disabled"
                           VerticalAlignment="Center">
                 <StackPanel Orientation="Horizontal">
+                  <Grid>
+                    <!-- The active-tab marker is ONE border that travels, not a
+                         background that lights up on each chip in turn. Browsers
+                         that move a single indicator (Safari, Arc, Firefox's
+                         underline) read as continuous because the eye tracks one
+                         object; fading a fill in on the destination and out on
+                         the source reads as two unrelated events, which is what
+                         the tab strip did through 0014.
+
+                         It lives in a Canvas so its width can animate: a Canvas
+                         gives its children infinite space and takes no size from
+                         them, so a width change here re-measures this one border
+                         and stops there, never reaching the tab strip let alone
+                         the window (d.animate-transforms-only leaves room for
+                         layout that provably cannot escape). -->
+                    <Canvas x:Name="TabIndicatorLayer" IsHitTestVisible="False">
+                        <Border x:Name="TabIndicator" CornerRadius="8"
+                                Background="{DynamicResource TabActive}"
+                                Opacity="0">
+                            <Border.RenderTransform>
+                                <TranslateTransform x:Name="TabIndicatorShift" />
+                            </Border.RenderTransform>
+                        </Border>
+                    </Canvas>
+
                     <ListBox x:Name="TabStrip"
                              Background="Transparent"
                              BorderThickness="0"
@@ -82,6 +107,7 @@
                             </DataTemplate>
                         </ListBox.ItemTemplate>
                     </ListBox>
+                  </Grid>
 
                     <Button Style="{StaticResource IconButton}"
                             Content="&#xE710;" FontSize="11"
@@ -93,20 +119,44 @@
 
             <StackPanel Grid.Column="1" Orientation="Horizontal"
                         VerticalAlignment="Center" Margin="10,0,8,0">
-                <Button x:Name="ImmersionButton"
-                        Style="{StaticResource ModePill}"
-                        Margin="0,0,4,0"
-                        Click="Immersion_Click">
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="&#xE7C4;"
-                                   FontFamily="Segoe MDL2 Assets"
-                                   FontSize="10"
-                                   VerticalAlignment="Center"
-                                   Margin="0,0,7,0" />
-                        <TextBlock x:Name="ImmersionLabel" Text="Immersion"
-                                   VerticalAlignment="Center" />
-                    </StackPanel>
-                </Button>
+                <!-- The slot has a FIXED width and the button is right-aligned
+                     inside it, so hover expansion grows the chip leftward into
+                     space that was already reserved. Nothing outside this Grid
+                     re-measures, and no sibling control moves: a button that
+                     shoves the theme and grid buttons sideways whenever the
+                     pointer crosses it is the jitter this arrangement exists to
+                     avoid. MeasureImmersionChip sets both widths from the real
+                     text metrics at load. -->
+                <Grid x:Name="ImmersionSlot" Margin="0,0,4,0">
+                    <Button x:Name="ImmersionButton"
+                            Style="{StaticResource ModeChip}"
+                            HorizontalAlignment="Right"
+                            Click="Immersion_Click">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock x:Name="ImmersionGlyph"
+                                       Text="&#xE7C4;"
+                                       FontFamily="Segoe MDL2 Assets"
+                                       FontSize="11"
+                                       VerticalAlignment="Center" />
+
+                            <!-- The label is clipped to a width that animates,
+                                 and sits in a Canvas so it keeps its natural
+                                 size while the clip is narrower than it. Given a
+                                 zero-width constraint directly it would wrap to
+                                 one character per line and change height, which
+                                 is the usual reason this effect looks broken. -->
+                            <Border x:Name="ImmersionLabelClip"
+                                    Width="0" ClipToBounds="True"
+                                    VerticalAlignment="Center">
+                                <Canvas>
+                                    <TextBlock x:Name="ImmersionLabel"
+                                               Text="Immersion"
+                                               Margin="8,0,0,0" />
+                                </Canvas>
+                            </Border>
+                        </StackPanel>
+                    </Button>
+                </Grid>
                 <Button x:Name="BigPictureButton"
                         Style="{StaticResource IconButton}"
                         Content="&#xE71B;" FontSize="13"

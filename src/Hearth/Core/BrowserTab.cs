@@ -64,6 +64,21 @@ public sealed class BrowserTab : INotifyPropertyChanged
     public bool HasRendered { get; internal set; }
 
     /// <summary>
+    /// Whether this tab's document has parsed, which is the earliest moment
+    /// there is anything on screen to look at.
+    ///
+    /// Distinct from <see cref="HasRendered"/> on purpose, and the gap between
+    /// them is large: HasRendered waits for NavigationCompleted, which waits for
+    /// every subresource of the page, and on a real site that is a second or
+    /// more after the layout the user would call "loaded". Capture needs the
+    /// stricter signal, because photographing a half-built page produces a
+    /// thumbnail of scaffolding. The startup curtain needs the looser one, or it
+    /// stays up over a page that has been readable for a second
+    /// (k.navigation-completed-is-not-first-paint).
+    /// </summary>
+    public bool HasContent { get; internal set; }
+
+    /// <summary>
     /// How many cross-origin subframe and media requests the content filter has
     /// refused on this page's current navigation.
     ///

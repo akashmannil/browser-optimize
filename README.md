@@ -47,6 +47,8 @@ Early. Built commit by commit, each with a design note in [`docs/commits/`](docs
 | [`0011`](docs/commits/0011-address-bar-follows-the-tab.md) | Address bar follows the tab, not keyboard focus |
 | [`0012`](docs/commits/0012-chrome-fixes-and-immersion-edges.md) | Restored missing caption buttons; smoother grid handoff; immersion edge chrome |
 | [`0013`](docs/commits/0013-motion-rework.md) | App-wide motion system, measured — and three optimisations it disproved |
+| [`0014`](docs/commits/0014-identity.md) | An icon, a name, and a window title that is not a debug string |
+| [`0015`](docs/commits/0015-transitions.md) | Startup and restart transitions — and the tab transition that was never on screen |
 
 ### Two modes
 
@@ -126,15 +128,50 @@ It had never really worked before `0010`, and the reason was not cosmetic: picki
 (`k.collapsed-host-blocks-initialisation`). Because Big Picture pins the budget to 1, nearly every
 card was a cold tab, so the failure rate depended on which card you clicked.
 
+### Transitions
+
+Every transition in Hearth works around one fact: **the page cannot be animated.** WebView2 is a
+child HWND that paints over all WPF content and ignores WPF opacity, so nothing can be blended with
+it. What is left is holding a still image, or an empty ground, until the real thing is ready — and
+then cutting between two frames that match.
+
+Startup is covered by the Hearth mark on an opaque window, held until the first page has actually
+parsed, with the browser frame dropping in behind it as it lifts. A mode switch raises the same
+curtain on both sides of the process boundary, since nothing else survives it; the successor is
+launched *before* the predecessor exits so its startup overlaps the animation rather than following
+it (1.15 s of dead air became 0.66 s, measured on one build alternating the two orderings).
+
+`0015` also found that the tab transition this project has described since `0004` **had never once
+been visible.** The shell painted an evicted tab's screenshot while its renderer rebuilt — under the
+outgoing page for the whole rebuild, then under the unpainted incoming one. Filmed, a switch showed
+the page you left, a near-black frame, then the new page cutting in.
+
+| Pane luminance across a switch to an evicted tab | minimum | frames that are neither page |
+| --- | ---: | ---: |
+| `0004`–`0014` | 18, 78 | 2, 1 |
+| `0015` | 229, 185, 232 | 0, 1, 0 |
+
+The curtain is **opaque rather than a window fade**, which is the better-looking of the two and
+costs half the frame rate: a `AllowsTransparency` window in WPF is composited in software. Three
+cold starts each — 8.0 ms/frame and zero long frames against 16.2 ms/frame and 2.6× the CPU
+(`k.layered-windows-are-software-drawn`). `HEARTH_VEIL=dissolve` keeps it reachable.
+
+Transitions honour Windows' own "show animations" setting, as every other browser does. Pointer
+feedback deliberately does not: it carries no travel, and removing it makes controls feel broken
+rather than calm.
+
 ## Interface
 
 There is no native title bar — the tab strip *is* the caption, with window controls at its right
-edge. Light and dark are fully tokenised and follow Windows by default; the toolbar button cycles
+edge. Selection is one marker that travels between chips rather than a background that lights up on
+each in turn. Light and dark are fully tokenised and follow Windows by default; the toolbar button cycles
 System → Light → Dark. Neutrals are Apple's system greys, with the ember accent darkened in light
 mode because ember on white fails contrast.
 
 ```powershell
-HEARTH_THEME=light   # or dark, or unset to follow Windows
+HEARTH_THEME=light      # or dark, or unset to follow Windows
+HEARTH_MOTION=0         # or 1; unset follows the Windows animation setting
+HEARTH_VEIL=dissolve    # fade the whole startup curtain out, at half the frame rate
 ```
 
 ### Content filtering (commits `0005`, `0008`)

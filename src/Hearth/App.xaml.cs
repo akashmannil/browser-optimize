@@ -49,26 +49,31 @@ public partial class App : Application
             .ToArray();
 
     /// <summary>
-    /// Relaunches Hearth in the other mode and exits this process.
+    /// Launches the replacement process, and returns whether it started.
     ///
-    /// The caller must have already written the session, because everything
-    /// in memory is about to be discarded. The new process is started BEFORE
-    /// shutting down so a failure to launch leaves the user with the browser
-    /// they already had rather than with nothing.
+    /// SEPARATE FROM THE EXIT, and the gap between them is the point. The
+    /// successor takes a second or more to put a window on screen, and until it
+    /// does there is nothing where the browser used to be -- filmed across an
+    /// F11, that showed as the desktop appearing for roughly half a second in
+    /// the middle of what is meant to be one transition. Starting it while this
+    /// process is still holding its curtain up spends that time in parallel
+    /// instead of in series (d.the-restart-is-a-transition).
     ///
-    /// The old process must actually exit and release the user-data folder: a
-    /// second environment cannot be created over it while the first browser
-    /// process is alive (k.browser-args-fixed-at-creation), which is the same
-    /// constraint that makes the restart necessary in the first place. The new
-    /// instance waits for the handover rather than racing it.
+    /// The successor cannot create its environment until this process actually
+    /// dies and releases the user-data folder (k.browser-args-fixed-at-creation),
+    /// so it waits for the handover; overlapping the two is safe precisely
+    /// because that wait already existed.
+    ///
+    /// The caller must have written the session first: everything in memory is
+    /// about to be discarded.
     /// </summary>
-    public static void RestartInto(HearthMode mode)
+    public static bool StartSuccessor(HearthMode mode)
     {
         var exe = Environment.ProcessPath;
         if (exe is null)
         {
             Diag.Log("restart aborted: no process path");
-            return;
+            return false;
         }
 
         try
@@ -77,24 +82,39 @@ public partial class App : Application
             start.ArgumentList.Add($"{ModeArgument}{mode.ToString().ToLowerInvariant()}");
             start.ArgumentList.Add($"--handover={Environment.ProcessId}");
 
-            Diag.Log($"restarting into {mode}");
+            Diag.Log($"starting successor in {mode}");
             Process.Start(start);
+            return true;
         }
         catch (Exception ex)
         {
+            // A failure here leaves the user with the browser they already have,
+            // which is the whole reason the launch comes before the exit.
             Diag.Log($"restart failed, staying put: {ex.Message}");
-            return;
+            return false;
         }
+    }
 
+    /// <summary>Exits, releasing the user-data folder to the successor.</summary>
+    public static void HandOver()
+    {
+        Diag.Log("handing over");
         Current.Shutdown();
     }
 
     /// <summary>
-    /// Blocks until the process we are replacing has exited, so its browser
+    /// Waits until the process we are replacing has exited, so its browser
     /// process has released the shared user-data folder. Without this the new
     /// instance can win the race and fail to create its environment at all.
+    ///
+    /// ASYNCHRONOUS, and that is the whole point of the rewrite in 0015. The
+    /// blocking version stalled the UI thread for as long as the old process
+    /// took to die, which meant the incoming window could not paint -- so a mode
+    /// switch showed an unpainted white rectangle, the shape Windows draws for
+    /// an application that is not responding. The wait is the same length; it is
+    /// now spent animating the startup curtain instead of frozen.
     /// </summary>
-    public static void AwaitHandover()
+    public static async Task AwaitHandoverAsync()
     {
         var arg = Environment.GetCommandLineArgs()
             .FirstOrDefault(a => a.StartsWith("--handover=", StringComparison.Ordinal));
@@ -103,12 +123,20 @@ public partial class App : Application
         try
         {
             using var previous = Process.GetProcessById(pid);
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
             Diag.Log($"waiting for pid {pid} to exit");
-            previous.WaitForExit(10_000);
+            await previous.WaitForExitAsync(deadline.Token);
         }
         catch (ArgumentException)
         {
             // Already gone, which is the good case.
+        }
+        catch (OperationCanceledException)
+        {
+            // The old process outlived its welcome. Carry on and let environment
+            // creation report the real problem if the folder is still locked.
+            Diag.Log("handover timed out");
         }
         catch (Exception ex)
         {

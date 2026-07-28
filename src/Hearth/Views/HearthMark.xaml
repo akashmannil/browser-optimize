@@ -1,0 +1,60 @@
+<UserControl x:Class="Hearth.Views.HearthMark"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Focusable="False" IsHitTestVisible="False">
+
+    <!-- The same mark as the application icon, drawn as vectors instead of
+         rasterised (d.hearth-mark): an arch STROKE, the mouth of a hearth, with
+         a single ember banked on the floor inside it.
+
+         Not the .ico. That file exists at 16 to 256 px and the splash wants it
+         at 96 and growing, so it would be an upscale of a 256 px bitmap at
+         exactly the moment it is the only thing on screen. Vectors are also
+         animatable: the ember below breathes, which a bitmap cannot do without
+         a frame sequence.
+
+         The coordinates are the icon generator's, converted from fractions of
+         the tile to a 100-unit box, so the two marks stay the same shape:
+         tools/make-icon.py is still the source of the design. -->
+    <Viewbox Stretch="Uniform">
+        <Canvas Width="100" Height="100">
+
+            <!-- The halo under the ember. Its own element so it can be animated
+                 without touching the dot, and so the breathing is a single
+                 Opacity on a leaf rather than an effect (k.effects-are-per-frame). -->
+            <Ellipse x:Name="Halo"
+                     Canvas.Left="27" Canvas.Top="44.5"
+                     Width="46" Height="46"
+                     Opacity="0.5">
+                <Ellipse.Fill>
+                    <RadialGradientBrush>
+                        <GradientStop Offset="0" Color="#CCFFB060" />
+                        <GradientStop Offset="0.45" Color="#59FFB060" />
+                        <GradientStop Offset="1" Color="#00FFB060" />
+                    </RadialGradientBrush>
+                </Ellipse.Fill>
+            </Ellipse>
+
+            <!-- The arch. Stroked along its centre line rather than built as
+                 outer-minus-inner, which is the same shape with one path instead
+                 of a combined geometry. Flat caps so the legs end square on the
+                 hearth floor; a round cap turns the opening into a tunnel. -->
+            <Path StrokeThickness="10.5"
+                  StrokeStartLineCap="Flat"
+                  StrokeEndLineCap="Flat"
+                  Data="M 29.25,77.5 L 29.25,47.5 A 20.75,20.75 0 0 1 70.75,47.5 L 70.75,77.5">
+                <Path.Stroke>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                        <GradientStop Offset="0" Color="#FAC478" />
+                        <GradientStop Offset="1" Color="#E77E34" />
+                    </LinearGradientBrush>
+                </Path.Stroke>
+            </Path>
+
+            <Ellipse x:Name="Ember"
+                     Canvas.Left="42.5" Canvas.Top="60"
+                     Width="15" Height="15"
+                     Fill="#FFE2B2" />
+        </Canvas>
+    </Viewbox>
+</UserControl>

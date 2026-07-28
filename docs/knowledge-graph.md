@@ -241,6 +241,79 @@ Six real sites, every tab activated so the budget binds, one Debug build, 95 s s
 that memory does not matter — it is that the user should decide when to spend it and be able to see
 what they spent (`m.immersion-cost`).
 
+## Transitions (commit `0015`)
+
+Every transition in Hearth works around one fact: **the page cannot be animated.** WebView2 is a
+child HWND that paints over all WPF content and ignores WPF opacity entirely, so nothing can be
+blended with it. What is left is holding a still image, or an empty ground, until the real thing is
+ready — and then cutting.
+
+```mermaid
+graph TD
+  AIR["k.wpf-airspace<br/>a child HWND paints over everything"]
+
+  NEV["k.the-placeholder-was-never-visible<br/>the snapshot was under a live page<br/>for three commits"]
+  REV["d.reveal-when-the-page-is-ready<br/>hide the pages first,<br/>hold the new one back"]
+  SIG["k.navigation-completed-is-not-first-paint<br/>DOMContentLoaded is ~1 s earlier"]
+
+  WIN["d.airspace-needs-a-second-window<br/>a sibling HWND composites above"]
+  VEIL["cmp.veil<br/>the curtain"]
+  START["d.startup-is-a-transition"]
+  REST["d.the-restart-is-a-transition<br/>same mark either side of the exit"]
+  LAY["k.layered-windows-are-software-drawn<br/>124 fps opaque vs 63 dissolved"]
+
+  MARK["d.one-marker-travels<br/>one border moves between chips"]
+  STARVE["k.starving-the-layout-phase-blanks-webview2<br/>an unbounded retry blanked the page"]
+
+  AIR --> NEV
+  NEV --> REV
+  SIG --> REV
+  AIR --> WIN
+  WIN --> VEIL
+  VEIL --> START
+  VEIL --> REST
+  LAY --> VEIL
+  SIG --> START
+  MARK --> STARVE
+
+  style AIR fill:#742a2a,stroke:#4a1a1a,color:#fff
+  style NEV fill:#742a2a,stroke:#4a1a1a,color:#fff
+  style SIG fill:#742a2a,stroke:#4a1a1a,color:#fff
+  style LAY fill:#742a2a,stroke:#4a1a1a,color:#fff
+  style STARVE fill:#742a2a,stroke:#4a1a1a,color:#fff
+  style REV fill:#2F855A,stroke:#1a4a30,color:#fff
+  style START fill:#2F855A,stroke:#1a4a30,color:#fff
+  style REST fill:#2F855A,stroke:#1a4a30,color:#fff
+  style MARK fill:#2F855A,stroke:#1a4a30,color:#fff
+  style WIN fill:#2F855A,stroke:#1a4a30,color:#fff
+  style VEIL fill:#E8833A,stroke:#8a4a12,color:#1E1F22
+```
+
+### The transition that was never on screen
+
+Since `0004` the shell has painted an evicted tab's screenshot while its renderer rebuilt, then
+cross-faded it out. Filmed at ~37 fps, that switch showed the page being left, **a near-black
+frame**, then the new page cutting in. The snapshot was never visible: it sat under the outgoing
+page for the whole rebuild, then under the unpainted incoming one.
+
+| Pane luminance across a cold-tab switch | minimum | frames that are neither page |
+| --- | ---: | ---: |
+| before (`0004`–`0014`) | 18, 78 | 2, 1 |
+| after (`0015`) | 229, 185, 232 | 0, 1, 0 |
+
+### The curtain, opaque by measurement
+
+Three cold starts each, one build, only the curtain's exit path varying:
+
+| | ms/frame | fps | long frames | CPU |
+| --- | ---: | ---: | ---: | ---: |
+| opaque, contents fade | **8.0** | 124–125 | **0, 0, 0** | ~292 ms |
+| `AllowsTransparency`, window fades | 16.2 | 56–67 | 0, 0, 1 | ~771 ms |
+
+The window fade is the better-looking of the two — the chrome and the live page arrive together —
+and costs half the frame rate, because a per-pixel-alpha window is composited in software
+(`k.layered-windows-are-software-drawn`). Reachable as `HEARTH_VEIL=dissolve`.
+
 ## Measured results (commit `0003`)
 
 Eight real sites, every tab activated so the budget binds:
@@ -314,7 +387,7 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 
 <!-- GENERATED: node index below is rebuilt from knowledge-graph.json. -->
 
-**102 nodes, 229 edges**, current to commit `0014`. This table is generated from the JSON; edit the JSON, never this table.
+**114 nodes, 263 edges**, current to commit `0015`. This table is generated from the JSON; edit the JSON, never this table.
 
 ### Problems (4)
 
@@ -323,7 +396,7 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 | `p.tab-hoarding` | People keep 100-500 tabs open because the tab strip is the only place where 'things I still care about' remain visible. Refusing to close is a... |
 | `p.invisible-cost` | Users experience the symptom (a slow machine) but do not attribute it to the browser. Because the cost is never made legible, there is no pressure to... |
 | `p.lossy-restore` | Chrome Memory Saver, The Great Suspender and similar tools lose scroll position, form state and media timestamps on restore. The papercut causes... |
-| `p.archive-blackhole` | OneTab, Session Buddy and Toby convert a visible anxious pile into an invisible list nobody revisits. Users intuit this and resist adoption... |
+| `p.archive-blackhole` | OneTab, Session Buddy and Toby convert a visible anxious pile into an invisible list nobody revisits. Users intuit this and resist adoption,... |
 
 ### Concepts (5)
 
@@ -335,7 +408,7 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 | `c.ram-for-disk-trade` | Disk cost is effectively free at any realistic tab count. 1,000 hibernated tabs would occupy roughly 27 MB. There is no reason to ration snapshots or... |
 | `c.hibernate-by-default` **[core thesis]** | Every other browser treats loaded as default and unloading as an emergency. Chrome Memory Saver and Firefox tab unloading are REACTIVE, triggering... |
 
-### Decisions (23)
+### Decisions (28)
 
 | id | one-line |
 | --- | --- |
@@ -357,13 +430,18 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 | `d.grid-inherits-the-mode` | One layout, two correct results, and no mode check in the XAML. Up to 0009 the grid forced the window to maximise, so opening it resized the browser... |
 | `d.single-click-opens` | This was the single biggest reason the grid read as broken. Nothing else in this app, and no tab switcher anyone has used, needs two clicks to pick a... |
 | `d.zoom-connects-card-to-page` | The transition should make the page you land on visibly the card you chose. A cut, or a plain crossfade, leaves the user to re-establish where they... |
-| `d.address-bar-follows-the-tab` | Guarding on focus alone was wrong because focus SURVIVES a tab switch: Ctrl+T focuses the bar, and every switch after that (Ctrl+Tab, Ctrl+1... |
+| `d.address-bar-follows-the-tab` | Guarding on focus alone was wrong because focus SURVIVES a tab switch: Ctrl+T focuses the bar, and every switch after that (Ctrl+Tab, Ctrl+1,... |
 | `d.airspace-needs-a-second-window` | k.wpf-airspace makes an in-window overlay invisible the moment a page paints. 0006 solved that for the tab grid by collapsing the content host, which... |
 | `d.snapshot-handoff-covers-the-load` | k.collapsed-host-blocks-initialisation forces the order 'animate, then activate', so the zoom finished and the page load began with nothing on screen... |
 | `d.one-motion-vocabulary` | Before 0013 there were two durations and four easings applied more or less at random, and half the controls had no motion at all. The app read as... |
 | `d.hearth-mark` | It says hearth rather than fire, which is the actual idea: the product is about banking embers and coming back to them, not about burning. An arch is... |
+| `d.startup-is-a-transition` | Creating a browser process and loading a page takes seconds and used to happen in full view, as an empty grey window that looked hung. The wait is... |
+| `d.the-restart-is-a-transition` | Switching mode kills the application and starts another one, which cannot be hidden. The mark is the only thing that can survive the boundary, so it... |
+| `d.reveal-when-the-page-is-ready` | It is the only way the hibernation placeholder is ever on screen (k.the-placeholder-was-never-visible), and it removes the near-black frame that used... |
+| `d.one-marker-travels` | Two chips fading in opposite directions read as two unrelated events. Browsers that move a single indicator read as continuous, because the eye... |
+| `d.motion-honours-the-system-switch` | A browser is exactly the kind of application people turn animations off for: weak hardware, remote desktop, or a vestibular disorder that makes a... |
 
-### Constraints (immovable) (24)
+### Constraints (immovable) (28)
 
 | id | one-line |
 | --- | --- |
@@ -391,6 +469,10 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 | `k.effects-are-per-frame` | Elevation is expressed with a hairline border and background contrast instead. Effects are acceptable only on things that do not animate and do not... |
 | `k.cached-bitmap-loses-to-visualbrush` | The obvious 'rasterise once' optimisation is wrong for anything that scales up substantially. Reverted; the VisualBrush is the shipped path. |
 | `k.begintime-null-never-runs` | BeginTime is a TimeSpan? whose default is TimeSpan.Zero. Assigning null does not mean 'no delay', it means the timeline never begins. No error is... |
+| `k.the-placeholder-was-never-visible` | A transition that hides a WebView2 must take the pages off screen BEFORE the rebuild and hold the new control back until its page has painted. There... |
+| `k.navigation-completed-is-not-first-paint` | CoreWebView2.NavigationCompleted waits for every subresource on the page. Against google.com it fired after the startup curtain's 2.6 s ceiling had... |
+| `k.starving-the-layout-phase-blanks-webview2` | A dispatcher callback that reschedules itself must have a bounded retry count. One that can never succeed does not fail loudly, it starves whatever... |
+| `k.layered-windows-are-software-drawn` | Per-pixel-alpha (layered) windows bypass the GPU: the whole window is composited on the UI thread every frame. At browser size that halves the frame... |
 
 ### WebView2 APIs (4)
 
@@ -412,7 +494,7 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 | `m.immersion-cost` | Six real sites, every tab activated so the budget binds, one Debug build, 95 s settle. Browse: 3 renderers / 890 MB. Immersion: 20 renderers / 2197... |
 | `m.animation-smoothness` | Tab grid entrance after 0013: 0.7 long frames (>25 ms) per 450 ms entrance across six runs, worst gap 17-78 ms, typically 70-120 fps. The animations... |
 
-### Components (22)
+### Components (24)
 
 | id | one-line |
 | --- | --- |
@@ -438,8 +520,10 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 | `cmp.motion` | Only ever targets Opacity or a Transform. |
 | `cmp.framemeter` | Smoothness was the one quality claim in the project that had never been measured. Long-frame count is the headline: mean frame rate saturates at the... |
 | `cmp.icon-generator` | Each size is rendered independently at 16x supersample and downsampled with LANCZOS. Scaling a single 256px master down to 16px produces mud. |
+| `cmp.veil` | Opaque, never AllowsTransparency. A layered window at this size is software-composited and costs half the frame rate... |
+| `cmp.hearth-mark` | The breath is one Opacity on one small leaf: no effect, no layout, no transform. It runs during the busiest moment in the process and its only job is... |
 
-### Commits (14)
+### Commits (15)
 
 | id | one-line |
 | --- | --- |
@@ -455,5 +539,6 @@ owns. Environment ownership moved here from `MainWindow` in commit `0002`.
 | `commit.0010` | Found and fixed the reason picking a tab from the grid hung: activation was started while the content host was still collapsed. Grid no longer... |
 | `commit.0011` | The address bar no longer keeps showing the previous tab's URL after a switch made while it had keyboard focus. |
 | `commit.0012` | Restored the maximise and immersion buttons, which had been empty strings since 0008, and made every non-ASCII source literal an escape. Labelled the... |
-| `commit.0013` | A shared motion vocabulary applied app-wide, with previously static controls animated and press feedback added. Introduced frame instrumentation... |
+| `commit.0013` | A shared motion vocabulary applied app-wide, with previously static controls animated and press feedback added. Introduced frame instrumentation,... |
 | `commit.0014` | Real application icon (arch-and-ember mark, generated and reproducible), wired as both ApplicationIcon and Window.Icon, plus assembly metadata and a... |
+| `commit.0015` | Startup curtain and mode-restart handoff carrying the mark; the hibernation placeholder made visible for the first time since 0004; a travelling... |

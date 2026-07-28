@@ -81,8 +81,25 @@ public sealed class TabManager
     /// </summary>
     public event EventHandler<BrowserTab>? Rehydrating;
 
-    /// <summary>Raised once live content is behind the placeholder.</summary>
+    /// <summary>
+    /// Raised once the rebuilt tab's live control is on screen, so the shell can
+    /// take its placeholder down. Until 0015 this fired the moment the renderer
+    /// EXISTED, which is several seconds earlier than the moment it has anything
+    /// to show.
+    /// </summary>
     public event EventHandler<BrowserTab>? Rehydrated;
+
+    /// <summary>
+    /// Awaited between a rebuilt tab's renderer existing and its control being
+    /// SHOWN. The shell holds its snapshot here until the page is worth looking
+    /// at (k.the-placeholder-was-never-visible).
+    ///
+    /// It is awaited outside the budget semaphore deliberately. This waits for a
+    /// real page load, and holding the gate for that long would queue every
+    /// other tab switch behind it -- the same failure mode that made picking a
+    /// tab from the grid hang the browser (k.collapsed-host-blocks-initialisation).
+    /// </summary>
+    public Func<BrowserTab, Task>? RevealGate { get; set; }
 
     /// <summary>Tabs currently holding a full renderer. This is what the budget caps.</summary>
     public int LiveCount => _tabs.Count(t => t.State == TabState.Live);
@@ -390,40 +407,79 @@ public sealed class TabManager
     {
         if (!_tabs.Contains(tab)) return;
 
-        // A tab with no controller has to be rebuilt from scratch, which is the
-        // only case the user could otherwise see as a blank pane.
-        var needsRebuild = tab.View is null && Snapshots.Has(tab.Id);
+        // A tab with no controller has to be rebuilt from scratch: a real page
+        // load, of a second or more.
+        //
+        // This deliberately no longer asks whether a snapshot exists. It used
+        // to, and the consequence was that picking a never-yet-visited tab left
+        // the PREVIOUS page on screen for the whole load and then cut to the new
+        // one -- so for half a second the browser showed a page the user had
+        // just navigated away from, which is worse than showing nothing. A tab
+        // with a snapshot gets its picture held; a tab without one gets the
+        // app's own ground and the loading bar. Both beat a stale page.
+        var needsRebuild = tab.View is null;
         if (needsRebuild) Rehydrating?.Invoke(this, tab);
 
         await _budgetGate.WaitAsync();
         try
         {
+            // The host must be on screen before anything is realised inside
+            // it (k.collapsed-host-blocks-initialisation). This restores only a
+            // hide THIS class performed; the tab grid collapses the same panel
+            // for its own reasons and restores it itself.
+            ShowHost();
+
             // Capture the OUTGOING tab before anything else touches visibility.
             // CapturePreviewAsync can only photograph a controller that is still
             // visible and painted (k.capture-requires-live), so blur is the last
             // moment a snapshot can be taken -- by eviction time the tab has long
             // since been collapsed and there is nothing left to photograph.
+            //
+            // The VISIBILITY CHECK is load-bearing rather than defensive.
+            // CapturePreviewAsync against a collapsed controller does not fail,
+            // it never returns, and this call holds the budget semaphore -- so
+            // the tab being switched to never activates and the browser sits on
+            // an empty pane for good. Found by adding a blank step to the grid
+            // handoff, which collapsed the outgoing view a few lines above this
+            // and hung the switch every single time.
             if (Active is { } outgoing
                 && !ReferenceEquals(outgoing, tab)
-                && outgoing.View?.CoreWebView2 is not null)
+                && outgoing.View is { Visibility: Visibility.Visible }
+                && outgoing.View.CoreWebView2 is not null)
             {
                 await Snapshots.CaptureAsync(outgoing);
             }
 
+            // A rebuild is a real page load, and the screen has to be cleared
+            // for it NOW rather than when it finishes.
+            //
+            // Until 0015 the outgoing page stayed visible for the whole rebuild
+            // and the incoming control was shown the instant its renderer
+            // existed, which is well before it has painted. The shell's snapshot
+            // placeholder was raised on time and was never once visible: it sat
+            // underneath a live HWND the entire time, because WebView2 paints
+            // above all WPF content (k.wpf-airspace). Filming a switch showed
+            // the page being left, then a black frame, then the new page cutting
+            // in -- the placeholder machinery had been dead since 0004 and the
+            // hole it exists to fill was still there
+            // (k.the-placeholder-was-never-visible).
+            if (needsRebuild) HideViews();
+
             await RealiseAsync(tab);
-            if (needsRebuild) Rehydrated?.Invoke(this, tab);
 
             Active = tab;
             tab.LastActivatedUtc = DateTime.UtcNow;
             tab.ActivationCount++;
 
-            foreach (var other in _tabs)
-            {
-                if (other.View is not null)
-                    other.View.Visibility = ReferenceEquals(other, tab)
-                        ? Visibility.Visible
-                        : Visibility.Collapsed;
-            }
+            // The host goes down, then the control comes up inside it. The
+            // control becomes visible while its ancestor is collapsed, so
+            // IsVisible stays false and nothing has to be shown yet;
+            // uncollapsing the host afterwards is the real layout change that
+            // brings the page back. It also puts the snapshot placeholder on
+            // screen for free, because that lives beside the host rather than
+            // inside it.
+            if (needsRebuild) HideHost();
+            ShowOnly(tab);
 
             await EnforceBudgetAsync();
         }
@@ -432,7 +488,66 @@ public sealed class TabManager
             _budgetGate.Release();
         }
 
+        // Outside the gate: see RevealGate.
+        if (needsRebuild)
+        {
+            if (RevealGate is { } gate) await gate(tab);
+
+            // The user may have moved on while the page loaded. Bringing the
+            // host back is unconditional -- leaving it collapsed would leave the
+            // browser with no content area at all -- but this tab only gets to
+            // be the visible one if it is still the active one.
+            if (ReferenceEquals(Active, tab)) ShowOnly(tab);
+            ShowHost();
+
+            Rehydrated?.Invoke(this, tab);
+        }
+
         Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Takes every page off screen, leaving the shell's own ground.
+    ///
+    /// For the grid, which has to uncollapse the content host BEFORE it can
+    /// activate anything (k.collapsed-host-blocks-initialisation) and would
+    /// otherwise reveal the page the user just navigated away from for the
+    /// length of a page load. Blanking is a view-level collapse, not a host
+    /// one, so it does not re-create that hazard.
+    /// </summary>
+    public void Blank() => HideViews();
+
+    private void HideViews()
+    {
+        foreach (var other in _tabs)
+            if (other.View is not null) other.View.Visibility = Visibility.Collapsed;
+    }
+
+    /// <summary>Whether the content host is collapsed because THIS class did it.</summary>
+    private bool _hostHidden;
+
+    private void HideHost()
+    {
+        _contentHost.Visibility = Visibility.Collapsed;
+        _hostHidden = true;
+    }
+
+    private void ShowHost()
+    {
+        if (!_hostHidden) return;
+        _contentHost.Visibility = Visibility.Visible;
+        _hostHidden = false;
+    }
+
+    private void ShowOnly(BrowserTab tab)
+    {
+        foreach (var other in _tabs)
+        {
+            if (other.View is not null)
+                other.View.Visibility = ReferenceEquals(other, tab)
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+        }
     }
 
     /// <summary>
@@ -543,9 +658,16 @@ public sealed class TabManager
         // point at which the tab's own URL is known. The content filter reads it
         // to decide what counts as cross-site, and it has to be right BEFORE the
         // page's subresources start arriving.
+        // The earliest honest "there is something to see" signal. Used by the
+        // startup curtain, which would otherwise wait for NavigationCompleted
+        // and stay up over a page that finished laying out a second earlier
+        // (k.navigation-completed-is-not-first-paint).
+        core.DOMContentLoaded += (_, _) => tab.HasContent = true;
+
         core.NavigationStarting += (_, e) =>
         {
             tab.Url = e.Uri;
+            tab.HasContent = false;
 
             // A blocked-request count belongs to one page. Carried across a
             // navigation it would describe the previous page, and the shield
@@ -677,5 +799,6 @@ public sealed class TabManager
         // A rebuilt tab has not painted again yet, so it is not photographable
         // until its next navigation completes.
         tab.HasRendered = false;
+        tab.HasContent = false;
     }
 }
